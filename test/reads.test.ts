@@ -257,6 +257,7 @@ describe('one item', () => {
       totalChanges: 0,
       changesPage: 1,
       changesPages: 1,
+      version: 4,
     });
     expect(queries('/tasks')).toEqual([{ project: '10', user_story: '1002' }]);
   });

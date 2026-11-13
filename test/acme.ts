@@ -235,6 +235,7 @@ const TASK_DETAIL = {
   created_date: '2026-03-03T08:00:00.000Z',
   modified_date: '2026-03-09T09:30:00.000Z',
   tags: [],
+  version: 7,
 };
 
 const STORY_DETAIL = {
@@ -249,6 +250,8 @@ const STORY_DETAIL = {
   // Linh, and someone who has left the project since.
   watchers: [8, 404],
   total_voters: 2,
+  milestone: 101,
+  version: 4,
 };
 
 /** Newest first. The second file was replaced by a newer one and is marked as such in Taiga. */
@@ -420,9 +423,10 @@ const EPIC_DETAIL = {
   created_date: '2026-01-05T08:00:00.000Z',
   modified_date: '2026-03-08T08:00:00.000Z',
   tags: [],
+  version: 1,
 };
 
-const ISSUE_DETAIL = { ...ISSUES[0], description: 'Steps to reproduce: …', tags: null };
+const ISSUE_DETAIL = { ...ISSUES[0], description: 'Steps to reproduce: …', tags: null, version: 2 };
 
 const comment = (created_at: string, name: string, text: string, deleted = false) => ({
   created_at,

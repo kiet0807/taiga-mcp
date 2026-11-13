@@ -125,6 +125,13 @@ interface RawItem {
   readonly total_voters?: number | null;
   /** Only when a single item is read. */
   readonly description?: string;
+  /**
+   * Goes up by one with every change. A change must name the version it was based on; Taiga
+   * refuses it when someone else has changed the same fields since.
+   */
+  readonly version?: number;
+  /** Id of the sprint. Stories, tasks and issues have one; null in the backlog. */
+  readonly milestone?: number | null;
 }
 
 export interface RawStory extends RawItem {
@@ -374,6 +381,24 @@ export interface ItemDetail extends ItemSummary {
   /** Which page of the history `changes` is, and how many pages there are. */
   readonly changesPage: number;
   readonly changesPages: number;
+  /** What a change must name to be based on this reading. */
+  readonly version: number | undefined;
+}
+
+/** What a create or a change did, for the answer. */
+export interface WriteResult {
+  readonly kind: ItemKind;
+  readonly ref: number;
+  readonly subject: string;
+  readonly project: string;
+  /** The item in Taiga's web app, when its address can be told from the API's. */
+  readonly url: string | undefined;
+  /** Each field that changed: label, value before, value after. Empty for a new item. */
+  readonly changed: readonly (readonly [label: string, before: string, after: string])[];
+  /** Facts about a new item, as label and value. */
+  readonly facts: readonly (readonly [label: string, value: string])[];
+  /** The version after the change, for the next change. */
+  readonly version: number | undefined;
 }
 
 /** One event of a project's activity, in words. */

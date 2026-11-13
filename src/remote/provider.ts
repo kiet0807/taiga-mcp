@@ -16,8 +16,10 @@ import { taigaAddress } from './guard.js';
 import type { Sealer } from './seal.js';
 import { tokenExpiry, type TaigaAuth, type TaigaTokens } from './taiga-auth.js';
 
-/** The one thing a token allows: reading. */
-export const SCOPE = 'read';
+/** Every token allows reading. */
+export const READ = 'read';
+/** Creating, changing and commenting: only when the person ticked the box at sign-in. */
+export const WRITE = 'write';
 
 const MINUTE = 60;
 const DAY = 24 * 60 * MINUTE;
@@ -56,7 +58,12 @@ interface PendingLogin {
   readonly state: string | undefined;
 }
 
-interface Code {
+/** What the person allowed at sign-in. Missing in tokens issued before writes existed: read only. */
+interface Grant {
+  readonly write?: boolean;
+}
+
+interface Code extends Grant {
   readonly id: string;
   readonly cid: string;
   readonly redirectUri: string;
@@ -67,13 +74,13 @@ interface Code {
   readonly refresh: string | undefined;
 }
 
-interface Access {
+interface Access extends Grant {
   readonly cid: string;
   readonly url: string;
   readonly token: string;
 }
 
-interface Refresh {
+interface Refresh extends Grant {
   readonly cid: string;
   readonly url: string;
   readonly refresh: string;
@@ -95,6 +102,8 @@ export interface LoginAsker {
   readonly app: string | undefined;
   /** Host the person is sent back to after signing in. This part cannot be made up. */
   readonly returnsTo: string;
+  /** The sign-in page offers the choice to allow changes. */
+  readonly mayWrite: boolean;
 }
 
 export interface ProviderOptions {
@@ -105,6 +114,11 @@ export interface ProviderOptions {
   readonly fixedTaiga: string | undefined;
   /** The address of the MCP endpoint: the resource tokens are issued for. */
   readonly resource: URL;
+  /**
+   * Offer the choice to allow changes at sign-in. Turning it off also takes writing away from
+   * tokens already issued.
+   */
+  readonly allowWrites?: boolean;
   /** Seconds since the epoch. */
   readonly now?: () => number;
   /** Writes the sign-in page. `request` goes back unchanged in the form. */
@@ -115,9 +129,10 @@ export interface ProviderOptions {
 const fingerprint = (clientId: string) =>
   createHash('sha256').update(clientId).digest('base64url').slice(0, 22);
 
-const asker = (pending: PendingLogin): LoginAsker => ({
+const asker = (pending: PendingLogin, mayWrite: boolean): LoginAsker => ({
   app: pending.app,
   returnsTo: new URL(pending.redirectUri).host,
+  mayWrite,
 });
 
 /**
@@ -133,6 +148,7 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
   readonly #taigaAt: ProviderOptions['taigaAt'];
   readonly #fixedTaiga: string | undefined;
   readonly #resource: URL;
+  readonly #allowWrites: boolean;
   readonly #now: () => number;
   readonly #showLogin: ProviderOptions['showLogin'];
   /** Codes already traded, until they expire. Kept in memory: a best effort on top of PKCE. */
@@ -143,6 +159,7 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
     this.#taigaAt = options.taigaAt;
     this.#fixedTaiga = options.fixedTaiga;
     this.#resource = options.resource;
+    this.#allowWrites = options.allowWrites === true;
     this.#now = options.now ?? (() => Math.floor(Date.now() / 1000));
     this.#showLogin = options.showLogin;
   }
@@ -183,16 +200,18 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
       codeChallenge: params.codeChallenge,
       state: params.state,
     };
+    // The scopes an app asks for are not what decides: the person does, with the box on the page.
+    // Apps registered before writes existed ask for "read" only, and would never see the choice.
     this.#showLogin(res, {
       request: this.#sealer.seal('login', pending, this.#now() + LOGIN_SECONDS),
-      ...asker(pending),
+      ...asker(pending, this.#allowWrites),
     });
   }
 
   /** Who a sign-in form is for, read back from its hidden field, to show the form again. */
   describeLogin(request: string): LoginAsker | undefined {
     const pending = this.#sealer.open<PendingLogin>('login', request)?.data;
-    return pending === undefined ? undefined : asker(pending);
+    return pending === undefined ? undefined : asker(pending, this.#allowWrites);
   }
 
   /** Step 2: the sign-in form was sent. Ask Taiga, and send the app its code. */
@@ -202,6 +221,8 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
     password: string,
     /** What the person typed as the address of their Taiga, when there is no fixed one. */
     address?: string,
+    /** The person ticked the box that allows changes. */
+    write = false,
   ): Promise<LoginOutcome> {
     const pending = this.#sealer.open<PendingLogin>('login', request)?.data;
     if (pending === undefined) return { kind: 'expired' };
@@ -220,6 +241,7 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
       url: taigaUrl,
       token: tokens.token,
       refresh: tokens.refresh,
+      write: write && this.#allowWrites,
     };
     const url = new URL(pending.redirectUri);
     url.searchParams.set('code', this.#sealer.seal('code', code, this.#now() + CODE_SECONDS));
@@ -247,7 +269,7 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
     if (this.#usedCodes.has(code.id)) throw new InvalidGrantError('The authorization code was already used');
     this.#usedCodes.set(code.id, now + CODE_SECONDS);
 
-    return this.#issue(code.cid, code.url, code);
+    return this.#issue(code.cid, code.url, code, code.write === true);
   }
 
   /** Later: the app renews its tokens. Taiga renews its own pair at the same time. */
@@ -259,7 +281,8 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
     if (!this.#serves(refresh.url)) throw new InvalidGrantError('Sign in again.');
     const tokens = await this.#taigaAt(refresh.url).refresh(refresh.refresh);
     if (tokens === undefined) throw new InvalidGrantError('Taiga ended the session. Sign in again.');
-    return this.#issue(refresh.cid, refresh.url, tokens);
+    // What was allowed at sign-in carries over, as long as the server still offers it.
+    return this.#issue(refresh.cid, refresh.url, tokens, refresh.write === true && this.#allowWrites);
   }
 
   /** Every request to the MCP endpoint: who is this, and with which Taiga token? */
@@ -268,13 +291,14 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
     if (access?.expiresAt === undefined || !this.#serves(access.data.url)) {
       throw new InvalidTokenError('The access token is not valid');
     }
+    const write = access.data.write === true && this.#allowWrites;
     return {
       token,
       clientId: access.data.cid,
-      scopes: [SCOPE],
+      scopes: write ? [READ, WRITE] : [READ],
       expiresAt: access.expiresAt,
       resource: this.#resource,
-      extra: { taigaUrl: access.data.url, taigaToken: access.data.token },
+      extra: { taigaUrl: access.data.url, taigaToken: access.data.token, write },
     };
   }
 
@@ -291,17 +315,17 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
     return code;
   }
 
-  #issue(cid: string, url: string, taiga: TaigaTokens): OAuthTokens {
+  #issue(cid: string, url: string, taiga: TaigaTokens, write: boolean): OAuthTokens {
     const now = this.#now();
     const taigaExpiry = tokenExpiry(taiga.token);
     const accessExpiry =
       taigaExpiry === undefined ? now + FALLBACK_ACCESS_SECONDS : taigaExpiry - MARGIN_SECONDS;
-    const access: Access = { cid, url, token: taiga.token };
+    const access: Access = { cid, url, token: taiga.token, write };
 
     let refreshToken: string | undefined;
     if (taiga.refresh !== undefined) {
       const refreshExpiry = tokenExpiry(taiga.refresh);
-      const refresh: Refresh = { cid, url, refresh: taiga.refresh };
+      const refresh: Refresh = { cid, url, refresh: taiga.refresh, write };
       refreshToken = this.#sealer.seal(
         'refresh',
         refresh,
@@ -312,7 +336,7 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
       access_token: this.#sealer.seal('access', access, accessExpiry),
       token_type: 'bearer',
       expires_in: Math.max(accessExpiry - now, 0),
-      scope: SCOPE,
+      scope: write ? `${READ} ${WRITE}` : READ,
       ...(refreshToken === undefined ? {} : { refresh_token: refreshToken }),
     };
   }

@@ -21,6 +21,17 @@ describe('loadConfig', () => {
     ).toEqual({ baseUrl: 'https://t.example', token: 'a', refreshToken: 'r' });
   });
 
+  it('stays read-only unless writes are switched on', () => {
+    const base = { TAIGA_URL: 'https://t.example', TAIGA_TOKEN: 't' };
+    expect(loadConfig(base).write).toBeUndefined();
+    expect(loadConfig({ ...base, TAIGA_WRITE: 'false' }).write).toBeUndefined();
+    expect(loadConfig({ ...base, TAIGA_WRITE: 'true' }).write).toBe(true);
+    expect(loadConfig({ ...base, TAIGA_WRITE: '1' }).write).toBe(true);
+    expect(() => loadConfig({ ...base, TAIGA_WRITE: 'yes please' })).toThrow(
+      /TAIGA_WRITE must be true or false/,
+    );
+  });
+
   it('treats an empty variable as unset', () => {
     expect(() => loadConfig({ TAIGA_URL: 'https://t.example', TAIGA_TOKEN: '  ' })).toThrow(ConfigError);
     expect(() => loadConfig({ TAIGA_URL: '', TAIGA_TOKEN: 't' })).toThrow(/TAIGA_URL is not set/);

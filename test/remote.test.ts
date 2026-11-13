@@ -8,6 +8,7 @@ import { ConfigError } from '../src/config.js';
 import { createApp } from '../src/remote/app.js';
 import { loadRemoteConfig } from '../src/remote/config.js';
 import { guardedFetch, isPublicAddress, taigaAddress } from '../src/remote/guard.js';
+import { TaigaOAuthProvider } from '../src/remote/provider.js';
 import { Sealer } from '../src/remote/seal.js';
 import { acme } from './acme.js';
 import { BASE, json, type Call } from './fake-taiga.js';
@@ -34,7 +35,9 @@ afterEach(async () => {
  * The hosted server on a free local port, in front of the fake Taiga. By default it is set up
  * for the one Taiga at `BASE`; `anyTaiga` lets each person type an address instead.
  */
-async function start(setup: { anyTaiga?: boolean; taigaUrl?: string | undefined } = { taigaUrl: BASE }) {
+async function start(
+  setup: { anyTaiga?: boolean; taigaUrl?: string | undefined; allowWrites?: boolean } = { taigaUrl: BASE },
+) {
   const clock = { now: START };
   const seconds = () => Math.floor(clock.now.getTime() / 1000);
   let issued = 0;
@@ -70,6 +73,10 @@ async function start(setup: { anyTaiga?: boolean; taigaUrl?: string | undefined 
       if (username === undefined) return json({ _error_message: 'Token is invalid' }, 401);
       refreshable.delete(refresh);
       return json(signedIn(username));
+    }
+    // A comment on story #42, for the tests of writing.
+    if (call.method === 'PATCH' && call.path === '/userstories/1002') {
+      return json({ id: 1002, ref: 42, subject: 'Retry failed card payments', version: 5 });
     }
     return undefined;
   });
@@ -141,7 +148,13 @@ interface Tokens {
 }
 
 /** The whole way from registering an app to holding tokens for one person. */
-async function connectAs(base: string, username: string, address?: string) {
+async function connectAs(
+  base: string,
+  username: string,
+  address?: string,
+  /** More fields of the sign-in form, e.g. the box that allows changes. */
+  more: Record<string, string> = {},
+) {
   const clientId = await register(base);
   const { request, verifier } = await openLogin(base, clientId);
   const login = await fetch(
@@ -151,6 +164,7 @@ async function connectAs(base: string, username: string, address?: string) {
       username,
       password: PASSWORDS[username] ?? '',
       ...(address === undefined ? {} : { address }),
+      ...more,
     }),
   );
   expect(login.status).toBe(302);
@@ -537,6 +551,126 @@ describe('the hosted server', () => {
   });
 });
 
+describe('changes through the hosted server', () => {
+  const toolNames = async (base: string, token: string) =>
+    (await (await mcp(base, token)).listTools()).tools.map((tool) => tool.name);
+
+  it('offers the choice at sign-in, unticked, only when the server allows changes', async () => {
+    const offering = await start({ taigaUrl: BASE, allowWrites: true });
+    const { html } = await openLogin(offering.base, await register(offering.base));
+    expect(html).toContain('<input type="checkbox" name="write">');
+    expect(html).toContain('change them only if you tick the box below');
+
+    const readOnly = await start();
+    const plain = await openLogin(readOnly.base, await register(readOnly.base));
+    expect(plain.html).not.toContain('name="write"');
+    expect(plain.html).toContain('It can only read');
+  });
+
+  it('gives the tools that write only to someone who ticked the box', async () => {
+    const { base, calls } = await start({ taigaUrl: BASE, allowWrites: true });
+
+    const reader = await connectAs(base, 'linh');
+    expect(reader.tokens.scope).toBe('read');
+    expect(await toolNames(base, reader.tokens.access_token)).not.toContain('add_comment');
+    const readerClient = await mcp(base, reader.tokens.access_token);
+    expect(readerClient.getInstructions()).toContain('tick the box on the sign-in page that allows changes');
+
+    const writer = await connectAs(base, 'kiet', undefined, { write: 'on' });
+    expect(writer.tokens.scope).toBe('read write');
+    const names = await toolNames(base, writer.tokens.access_token);
+    expect(names).toHaveLength(17);
+
+    const client = await mcp(base, writer.tokens.access_token);
+    const result = await client.callTool({
+      name: 'add_comment',
+      arguments: { project: 'acme-billing', ref: 42, text: 'Done on my side.' },
+    });
+    expect(textOf(result)).toContain('Commented on user story #42');
+    const patch = calls.find((call) => call.method === 'PATCH');
+    expect(patch?.body).toEqual({ comment: 'Done on my side.', version: 4 });
+    // As the person who allowed it, with their own Taiga token.
+    expect(patch?.headers['authorization']).toContain(
+      Buffer.from(
+        JSON.stringify({ exp: START.getTime() / 1000 + 24 * HOUR, name: 'kiet-access-2' }),
+      ).toString('base64url'),
+    );
+  });
+
+  it('keeps the box as it was after a wrong password', async () => {
+    const { base } = await start({ taigaUrl: BASE, allowWrites: true });
+    const { request } = await openLogin(base, await register(base));
+    const again = await fetch(
+      `${base}/login`,
+      form({ request, username: 'kiet', password: 'wrong', write: 'on' }),
+    );
+    expect(again.status).toBe(401);
+    expect(await again.text()).toContain('<input type="checkbox" name="write" checked>');
+  });
+
+  it('ignores the box when the server does not offer changes', async () => {
+    const { base } = await start();
+    const { tokens } = await connectAs(base, 'kiet', undefined, { write: 'on' });
+    expect(tokens.scope).toBe('read');
+    expect(await toolNames(base, tokens.access_token)).toHaveLength(14);
+  });
+
+  it('keeps the choice when tokens are renewed', async () => {
+    const { base } = await start({ taigaUrl: BASE, allowWrites: true });
+    const { clientId, tokens } = await connectAs(base, 'kiet', undefined, { write: 'on' });
+    const response = await fetch(
+      `${base}/token`,
+      form({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId }),
+    );
+    const renewed = (await response.json()) as Tokens;
+    expect(renewed.scope).toBe('read write');
+    expect(await toolNames(base, renewed.access_token)).toContain('update_item');
+  });
+
+  it('says which scopes exist, and that the server is read-only when it is', async () => {
+    const meta = async (base: string) =>
+      (await (await fetch(`${base}/.well-known/oauth-protected-resource/mcp`)).json()) as {
+        scopes_supported?: string[];
+        resource_name?: string;
+      };
+    const offering = await start({ taigaUrl: BASE, allowWrites: true });
+    expect(await meta(offering.base)).toMatchObject({ scopes_supported: ['read', 'write'] });
+    const readOnly = await start();
+    expect(await meta(readOnly.base)).toMatchObject({ scopes_supported: ['read'] });
+    expect((await meta(readOnly.base)).resource_name).toContain('(read-only)');
+  });
+
+  it('takes writing away from tokens already issued once the server stops offering it', async () => {
+    const seconds = () => Math.floor(Date.now() / 1000);
+    const sealer = new Sealer(SECRET, seconds);
+    const provider = (allowWrites: boolean) =>
+      new TaigaOAuthProvider({
+        sealer,
+        taigaAt: () => {
+          throw new Error('not used');
+        },
+        fixedTaiga: BASE,
+        resource: new URL('https://mcp.example/mcp'),
+        allowWrites,
+        showLogin: () => undefined,
+      });
+    const token = (grant: object) =>
+      sealer.seal('access', { cid: 'c', url: BASE, token: 't', ...grant }, seconds() + HOUR);
+
+    const allowed = await provider(true).verifyAccessToken(token({ write: true }));
+    expect(allowed.scopes).toEqual(['read', 'write']);
+    expect(allowed.extra?.['write']).toBe(true);
+
+    const withdrawn = await provider(false).verifyAccessToken(token({ write: true }));
+    expect(withdrawn.scopes).toEqual(['read']);
+    expect(withdrawn.extra?.['write']).toBe(false);
+
+    // A token issued before writes existed carries no choice: reading only.
+    const older = await provider(true).verifyAccessToken(token({}));
+    expect(older.scopes).toEqual(['read']);
+  });
+});
+
 describe('a server for any Taiga', () => {
   it('asks for the address of the Taiga, suggesting one when it was given', async () => {
     const blank = await start({ anyTaiga: true });
@@ -736,6 +870,7 @@ describe('the hosted configuration', () => {
     expect(loadRemoteConfig(env)).toEqual({
       taigaUrl: 'https://taiga.example',
       anyTaiga: false,
+      allowWrites: false,
       publicUrl: new URL('https://mcp.example'),
       secret: SECRET,
       port: 3000,
@@ -745,6 +880,7 @@ describe('the hosted configuration', () => {
       port: 8080,
       trustProxy: 0,
     });
+    expect(loadRemoteConfig({ ...env, ALLOW_WRITES: 'true' }).allowWrites).toBe(true);
   });
 
   it.each([
@@ -755,6 +891,7 @@ describe('the hosted configuration', () => {
     [{ ...env, MCP_SECRET: undefined }, 'at least 32 characters'],
     [{ ...env, TAIGA_URL: undefined }, 'TAIGA_URL is not set'],
     [{ ...env, ANY_TAIGA: 'maybe' }, 'ANY_TAIGA must be true or false'],
+    [{ ...env, ALLOW_WRITES: 'yes' }, 'ALLOW_WRITES must be true or false'],
     [{ ...env, PORT: 'abc' }, 'PORT must be a whole number'],
   ])('says what is wrong with %o', (bad, message) => {
     expect(() => loadRemoteConfig(bad)).toThrow(ConfigError);

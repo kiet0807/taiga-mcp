@@ -42,6 +42,7 @@ import type {
   TaskSummary,
   WikiPage,
   WikiPageSummary,
+  WriteResult,
 } from './types.js';
 
 export { TaigaError } from './http.js';
@@ -94,6 +95,57 @@ export interface TaskFilters extends ListFilters {
   readonly story?: number | undefined;
 }
 
+/** The kinds of item the server can create. Epics are planned in Taiga itself. */
+export type NewItemKind = 'story' | 'task' | 'issue';
+
+/** A new item, straight from the tool's arguments. Names are resolved before anything is sent. */
+export interface NewItem {
+  readonly kind: NewItemKind;
+  readonly subject: string;
+  readonly description?: string | undefined;
+  /** A status name; Taiga's default status when left out. */
+  readonly status?: string | undefined;
+  /** A member's name or username, or "me". */
+  readonly assignedTo?: string | undefined;
+  readonly tags?: readonly string[] | undefined;
+  /** A sprint name, "current", or "backlog" (no sprint). */
+  readonly sprint?: string | undefined;
+  /** For a task: the reference number of its user story. The task joins the story's sprint. */
+  readonly story?: number | undefined;
+  /** For a user story: the reference number of an epic to add it to. */
+  readonly epic?: number | undefined;
+  /** YYYY-MM-DD. */
+  readonly dueDate?: string | undefined;
+  /** For an issue: names as the project defines them. */
+  readonly type?: string | undefined;
+  readonly severity?: string | undefined;
+  readonly priority?: string | undefined;
+}
+
+/** A change to an item. Only the fields given are touched. */
+export interface ItemChange {
+  /** The version the change is based on, as get_item showed it. The current one when left out. */
+  readonly version?: number | undefined;
+  readonly subject?: string | undefined;
+  /** The whole new description: it replaces the old one. */
+  readonly description?: string | undefined;
+  readonly status?: string | undefined;
+  /** A member's name or username, "me", or "unassigned". */
+  readonly assignedTo?: string | undefined;
+  /** A sprint name, "current", or "backlog" (no sprint). */
+  readonly sprint?: string | undefined;
+  readonly addTags?: readonly string[] | undefined;
+  readonly removeTags?: readonly string[] | undefined;
+  /** YYYY-MM-DD, or null to clear it. */
+  readonly dueDate?: string | null | undefined;
+  readonly blocked?: boolean | undefined;
+  /** Why the item is blocked. */
+  readonly blockedNote?: string | undefined;
+  readonly type?: string | undefined;
+  readonly severity?: string | undefined;
+  readonly priority?: string | undefined;
+}
+
 /** Where each kind of item lives in Taiga's API, and what Taiga calls it elsewhere. */
 const API = {
   story: {
@@ -122,6 +174,10 @@ const KINDS = Object.keys(API) as ItemKind[];
 
 /** What `assigned_to` may say for "assigned to nobody". */
 const UNASSIGNED = new Set(['unassigned', 'nobody', 'no one', 'none']);
+/** What `assigned_to` may say for the signed-in user. */
+const ME = new Set(['me', 'myself']);
+/** A comment shown back in the answer is cut to this many characters. */
+const COMMENT_ECHO = 300;
 /** An error that lists every member is no help in a project of hundreds. */
 const MEMBERS_LISTED = 40;
 
@@ -218,13 +274,20 @@ export function forgetFiles(): void {
  */
 export class TaigaClient {
   readonly #http: TaigaHttp;
+  readonly #baseUrl: string;
   readonly #now: () => Date;
   readonly #projects = new Map<string, { at: number; project: Promise<Project> }>();
   #me: RawUser | undefined;
 
   constructor(config: TaigaConfig, fetchImpl: typeof fetch = fetch, now: () => Date = () => new Date()) {
     this.#http = new TaigaHttp(config, fetchImpl);
+    this.#baseUrl = config.baseUrl;
     this.#now = now;
+  }
+
+  /** Whether this connection may create and change items. */
+  get writable(): boolean {
+    return this.#http.writable;
   }
 
   async currentUser(): Promise<RawUser> {
@@ -476,6 +539,7 @@ export class TaigaClient {
       totalChanges: Math.max(activity?.total ?? 0, changes?.length ?? 0),
       changesPage,
       changesPages: Math.max(1, Math.ceil((activity?.total ?? 0) / CHANGES_SHOWN)),
+      version: item.version,
     };
   }
 
@@ -791,6 +855,309 @@ export class TaigaClient {
   /* ------------------------------ projects ------------------------------ */
 
   /** The project behind a slug, remembered for a minute. */
+  /* -------------------------------- writes -------------------------------- */
+
+  /** Add a comment to a story, issue, epic or task. */
+  async addComment(slug: string, ref: number, text: string): Promise<WriteResult> {
+    const comment = text.trim();
+    if (comment === '') throw new TaigaError('The comment is empty: pass the text to post.');
+    const { project, kind, id, current } = await this.#current(slug, ref);
+    // A comment changes no field, so the version read just now can never conflict.
+    const updated = await this.#http.write<WrittenItem>('PATCH', `${API[kind].list}/${id}`, {
+      comment,
+      version: current.version,
+    });
+    return {
+      ...this.#written(project, kind, updated),
+      changed: [],
+      facts: [['Comment', truncateText(comment, COMMENT_ECHO)]],
+    };
+  }
+
+  /** Create a user story, task or issue. Every name is checked before anything is sent. */
+  async createItem(slug: string, input: NewItem): Promise<WriteResult> {
+    const project = await this.#project(slug);
+    const { kind } = input;
+    const subject = input.subject.trim();
+    if (subject === '') throw new TaigaError('The title is empty: pass a `subject`.');
+    const only = (given: unknown, field: string, kinds: string) => {
+      if (given !== undefined) throw new TaigaError(`\`${field}\` is for ${kinds} only.`);
+    };
+    if (kind !== 'task') only(input.story, 'story', 'tasks');
+    if (kind === 'task' && input.story === undefined && input.sprint === undefined) {
+      // Taiga shows a task on the taskboard of a sprint or under its story; with neither, nobody sees it.
+      throw new TaigaError(
+        'A task needs a user story (`story`) or a sprint (`sprint`), or it appears on no board. ' +
+          'For work that belongs to no story, create a user story or an issue instead.',
+      );
+    }
+    if (kind !== 'story') only(input.epic, 'epic', 'user stories');
+    if (kind !== 'issue') {
+      only(input.type, 'type', 'issues');
+      only(input.severity, 'severity', 'issues');
+      only(input.priority, 'priority', 'issues');
+    }
+
+    const body: Record<string, unknown> = { project: project.id, subject };
+    if (input.description?.trim()) body['description'] = input.description;
+    if (input.status !== undefined) {
+      body['status'] = find(project, project.statuses[kind], input.status, `${API[kind].label} status`);
+    }
+    if (input.assignedTo !== undefined)
+      Object.assign(body, assignment(kind, await this.#person(project, input.assignedTo)));
+    const tags = tagList(input.tags ?? []);
+    if (tags.length > 0) body['tags'] = tags;
+    if (input.dueDate !== undefined) body['due_date'] = input.dueDate;
+    if (input.sprint !== undefined) body['milestone'] = (await this.#sprintFor(project, input.sprint)).id;
+    if (input.story !== undefined) {
+      const storyId = await this.#idOf(
+        project,
+        input.story,
+        'story',
+        'Pass the number of a user story as `story`.',
+      );
+      body['user_story'] = storyId;
+      // A task lives on the taskboard of its story's sprint, unless told otherwise.
+      if (input.sprint === undefined) {
+        body['milestone'] =
+          (await this.#http.get<RawStory>(`${API.story.list}/${storyId}`)).milestone ?? null;
+      }
+    }
+    if (kind === 'issue') {
+      if (input.type !== undefined)
+        body['type'] = find(project, project.issueTypes, input.type, 'issue type');
+      if (input.severity !== undefined)
+        body['severity'] = find(project, project.severities, input.severity, 'severity');
+      if (input.priority !== undefined)
+        body['priority'] = find(project, project.priorities, input.priority, 'priority');
+    }
+    const epicId =
+      input.epic === undefined
+        ? undefined
+        : await this.#idOf(project, input.epic, 'epic', 'Call list_epics for the epic numbers.');
+
+    const created = await this.#http.write<WrittenItem>('POST', API[kind].list, body);
+    const facts = factsOfNew(kind, project, created);
+    if (epicId !== undefined) {
+      try {
+        await this.#http.write('POST', `/epics/${epicId}/related_userstories`, {
+          epic: epicId,
+          user_story: created.id,
+        });
+        facts.push(['Epic', `#${input.epic}`]);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new TaigaError(
+          `User story #${created.ref} was created, but adding it to epic #${input.epic} failed (${reason}). ` +
+            'Do not create the story again: tell the user, who can add it to the epic in Taiga.',
+        );
+      }
+    }
+    return { ...this.#written(project, kind, created), changed: [], facts };
+  }
+
+  /**
+   * Change some fields of an item. Taiga refuses the change when someone else changed the same
+   * fields after `version`; fields nobody else touched are merged.
+   */
+  async updateItem(slug: string, ref: number, change: ItemChange): Promise<WriteResult> {
+    const { project, kind, id, current } = await this.#current(slug, ref);
+    const label = API[kind].label;
+    const body: Record<string, unknown> = {};
+    const changed: [string, string, string][] = [];
+    const set = (field: string, value: unknown, name: string, before: string, after: string) => {
+      if (before === after) return;
+      body[field] = value;
+      changed.push([name, before, after]);
+    };
+    const notFor = (given: unknown, kinds: readonly ItemKind[], why: string) => {
+      if (given !== undefined && kinds.includes(kind))
+        throw new TaigaError(`#${ref} is ${article(label)}: ${why}`);
+    };
+    notFor(change.sprint, ['epic'], 'epics are not planned in sprints.');
+    notFor(change.dueDate, ['epic'], 'Taiga keeps no due date for epics.');
+    for (const field of ['type', 'severity', 'priority'] as const) {
+      notFor(change[field], ['story', 'task', 'epic'], `only issues have a ${field}.`);
+    }
+
+    if (change.subject !== undefined) {
+      const subject = change.subject.trim();
+      if (subject === '') throw new TaigaError('The title cannot be empty.');
+      set('subject', subject, 'Title', current.subject, subject);
+    }
+    if (change.description !== undefined) {
+      const before = current.description ?? '';
+      if (before.trim() !== change.description.trim()) {
+        body['description'] = change.description;
+        changed.push(['Description', characters(before), characters(change.description)]);
+      }
+    }
+    if (change.status !== undefined) {
+      const statusId = find(project, project.statuses[kind], change.status, `${label} status`);
+      const after = nameOf(project.statuses[kind], statusId) ?? change.status;
+      set('status', statusId, 'Status', current.status_extra_info?.name ?? 'Unknown', after);
+    }
+    if (change.assignedTo !== undefined) {
+      const who = await this.#person(project, change.assignedTo);
+      const before = current.assigned_to_extra_info?.full_name_display ?? 'nobody';
+      if (before !== who.name) {
+        Object.assign(body, assignment(kind, who));
+        changed.push(['Assigned to', before, who.name]);
+      }
+    }
+    if (change.sprint !== undefined) {
+      const sprint = await this.#sprintFor(project, change.sprint);
+      const before =
+        nameOf(project.sprints, current.milestone) ??
+        (current.milestone ? 'another sprint' : 'none (backlog)');
+      set('milestone', sprint.id, 'Sprint', before, sprint.name);
+    }
+    if (change.addTags !== undefined || change.removeTags !== undefined) {
+      const before = (current.tags ?? []).map(tagName);
+      const removed = new Set(tagList(change.removeTags ?? []));
+      const after = tagList([
+        ...before.filter((tag) => !removed.has(tag.toLowerCase())),
+        ...(change.addTags ?? []),
+      ]);
+      const show = (tags: readonly string[]) => tags.join(', ') || 'none';
+      set('tags', after, 'Tags', show(before), show(after));
+    }
+    if (change.dueDate !== undefined) {
+      set(
+        'due_date',
+        change.dueDate,
+        'Due',
+        day(current.due_date ?? undefined) ?? 'none',
+        change.dueDate ?? 'none',
+      );
+    }
+    if (change.blocked !== undefined) {
+      const yesNo = (value: boolean) => (value ? 'yes' : 'no');
+      set('is_blocked', change.blocked, 'Blocked', yesNo(current.is_blocked ?? false), yesNo(change.blocked));
+    }
+    if (change.blockedNote !== undefined || change.blocked === false) {
+      const note = change.blocked === false ? '' : (change.blockedNote ?? '').trim();
+      set('blocked_note', note, 'Reason blocked', current.blocked_note?.trim() || 'none', note || 'none');
+    }
+    if (kind === 'issue') {
+      const names = issueNames(project, current);
+      if (change.type !== undefined) {
+        const typeId = find(project, project.issueTypes, change.type, 'issue type');
+        set('type', typeId, 'Type', names.type ?? 'none', nameOf(project.issueTypes, typeId) ?? change.type);
+      }
+      if (change.severity !== undefined) {
+        const severityId = find(project, project.severities, change.severity, 'severity');
+        set(
+          'severity',
+          severityId,
+          'Severity',
+          names.severity ?? 'none',
+          nameOf(project.severities, severityId) ?? change.severity,
+        );
+      }
+      if (change.priority !== undefined) {
+        const priorityId = find(project, project.priorities, change.priority, 'priority');
+        set(
+          'priority',
+          priorityId,
+          'Priority',
+          names.priority ?? 'none',
+          nameOf(project.priorities, priorityId) ?? change.priority,
+        );
+      }
+    }
+
+    if (changed.length === 0) {
+      return { ...this.#written(project, kind, current), changed: [], facts: [] };
+    }
+    const version = change.version ?? current.version;
+    // Taiga answers a version from the future with the same field name as a conflict: tell them apart here.
+    if (change.version !== undefined && current.version !== undefined && change.version > current.version) {
+      throw new TaigaError(
+        `#${ref} has no version ${change.version}: it is at version ${current.version}. Pass the version ` +
+          'get_item showed, or leave `version` out.',
+      );
+    }
+    let updated: WrittenItem;
+    try {
+      updated = await this.#http.write<WrittenItem>('PATCH', `${API[kind].list}/${id}`, { ...body, version });
+    } catch (error) {
+      if (error instanceof TaigaError && error.status === 400 && /version/i.test(error.message)) {
+        throw new TaigaError(
+          `Not changed: someone changed the same fields of #${ref} after version ${version} was read ` +
+            `(it is now at version ${current.version ?? 'unknown'}). Read it again with get_item, check with ` +
+            'the user that the change still makes sense, and retry with the new version.',
+          409,
+        );
+      }
+      throw error;
+    }
+    return { ...this.#written(project, kind, updated), changed, facts: [] };
+  }
+
+  /** The item behind a reference number, read in full just now. */
+  async #current(
+    slug: string,
+    ref: number,
+  ): Promise<{ project: Project; kind: ItemKind; id: number; current: WrittenItem }> {
+    const project = await this.#project(slug);
+    const { kind, id } = await this.#resolve(project, ref);
+    if (kind === undefined || id === undefined) {
+      throw new TaigaError(
+        `Project "${project.name}" has no item #${ref}. Use a list tool to find the reference number.`,
+        404,
+      );
+    }
+    const current = await this.#http.get<WrittenItem>(`${API[kind].list}/${id}`);
+    return { project, kind, id, current };
+  }
+
+  #written(project: Project, kind: ItemKind, item: WrittenItem) {
+    return {
+      kind,
+      ref: item.ref,
+      subject: item.subject,
+      project: project.name,
+      url: webAddress(this.#baseUrl, project.slug, kind, item.ref),
+      version: item.version,
+    };
+  }
+
+  /** Who `assigned_to` points at in a change: a member, the signed-in user, or nobody. */
+  async #person(project: Project, wanted: string): Promise<{ id: number | null; name: string }> {
+    const key = fold(wanted);
+    if (UNASSIGNED.has(key)) return { id: null, name: 'nobody' };
+    if (ME.has(key)) {
+      const me = await this.currentUser();
+      const member = project.members.find((m) => m.id === me.id);
+      if (member === undefined) {
+        throw new TaigaError(
+          `The signed-in user is not a member of project "${project.name}", so cannot be assigned.`,
+        );
+      }
+      return { id: member.id, name: member.name };
+    }
+    const member = findMember(project, wanted);
+    return { id: member.id, name: member.name };
+  }
+
+  /** The sprint a change puts an item in: one by name, the running one, or none (the backlog). */
+  async #sprintFor(project: Project, wanted: string): Promise<{ id: number | null; name: string }> {
+    // A sprint that really is named "Backlog" or "Current" wins over the keyword.
+    const named = project.sprints.find((sprint) => same(sprint.name, wanted) || same(sprint.slug, wanted));
+    if (named !== undefined) return { id: named.id, name: named.name };
+    if (same(wanted, 'backlog') || same(wanted, 'none')) return { id: null, name: 'none (backlog)' };
+    if (same(wanted, 'current')) {
+      const running = await this.#currentSprint(project);
+      return { id: running.id, name: running.name };
+    }
+    const open = project.sprints.filter((sprint) => !sprint.closed).map((sprint) => `"${sprint.name}"`);
+    throw new TaigaError(
+      `Project "${project.name}" has no sprint "${wanted}". Open sprints: ${open.join(', ') || 'none'}. ` +
+        'Or pass "current" for the running sprint, or "backlog" for none.',
+    );
+  }
+
   #project(slug: string): Promise<Project> {
     const key = slug.trim().toLowerCase();
     const cached = this.#projects.get(key);
@@ -1225,6 +1592,70 @@ function issueNames(project: Project, issue: RawIssue) {
 }
 
 const tagName = (tag: RawTag) => (typeof tag === 'string' ? tag : tag[0]);
+
+/* --------------------------------- writes --------------------------------- */
+
+/** What Taiga answers to a read, a create or a change of any kind of item. */
+type WrittenItem = RawStory & RawIssue & RawEpic & RawTask;
+
+/** Taiga's web app keeps its items at these paths. */
+const WEB_PATH: Readonly<Record<ItemKind, string>> = {
+  story: 'us',
+  task: 'task',
+  issue: 'issue',
+  epic: 'epic',
+};
+
+/**
+ * The item in Taiga's web app. A self-hosted Taiga serves the app and the API from one address;
+ * Taiga cloud serves its API from another host.
+ */
+function webAddress(apiBase: string, slug: string, kind: ItemKind, ref: number): string | undefined {
+  try {
+    const url = new URL(apiBase);
+    if (url.hostname === 'api.taiga.io') url.hostname = 'tree.taiga.io';
+    return `${url.origin}${url.pathname.replace(/\/+$/, '')}/project/${encodeURIComponent(slug)}/${WEB_PATH[kind]}/${ref}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The fields that set who an item is assigned to. A story also keeps a list of assignees. */
+function assignment(kind: ItemKind, who: { id: number | null }): Record<string, unknown> {
+  return kind === 'story'
+    ? { assigned_to: who.id, assigned_users: who.id === null ? [] : [who.id] }
+    : { assigned_to: who.id };
+}
+
+/** Tags as Taiga stores them: trimmed, lower case, each once. */
+function tagList(tags: readonly string[]): string[] {
+  return [...new Set(tags.map((tag) => tag.trim().toLowerCase()).filter(Boolean))];
+}
+
+/** A description in a line of the answer: how long it is, not what it says. */
+const characters = (text: string) => (text.trim() === '' ? '(empty)' : `(${text.trim().length} characters)`);
+
+/** What the answer says about a new item: where Taiga put it and with what. */
+function factsOfNew(kind: ItemKind, project: Project, item: WrittenItem): [string, string][] {
+  const facts: [string, string | undefined][] = [
+    ['Status', item.status_extra_info?.name],
+    ['Assigned to', item.assigned_to_extra_info?.full_name_display ?? 'nobody'],
+    [
+      'User story',
+      item.user_story_extra_info
+        ? `#${item.user_story_extra_info.ref} ${item.user_story_extra_info.subject}`
+        : undefined,
+    ],
+    ['Sprint', nameOf(project.sprints, item.milestone) ?? (kind === 'issue' ? undefined : 'none (backlog)')],
+    ['Tags', (item.tags ?? []).map(tagName).join(', ') || undefined],
+    ['Due', day(item.due_date ?? undefined)],
+  ];
+  if (kind === 'issue') {
+    const names = issueNames(project, item);
+    facts.push(['Type', names.type], ['Severity', names.severity], ['Priority', names.priority]);
+  }
+  return facts.filter((fact): fact is [string, string] => fact[1] !== undefined);
+}
 
 /** The facts that only one kind of item has, as label and value. Missing ones are left out. */
 function factsOf(

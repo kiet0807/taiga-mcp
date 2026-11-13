@@ -1,4 +1,4 @@
-import { ConfigError, normalizeBaseUrl, read, type Env } from '../config.js';
+import { ConfigError, flag, normalizeBaseUrl, read, type Env } from '../config.js';
 
 /** What the hosted server needs to know. Read once from the environment at start-up. */
 export interface RemoteConfig {
@@ -9,6 +9,11 @@ export interface RemoteConfig {
   readonly taigaUrl: string | undefined;
   /** Each person types the address of their own Taiga. */
   readonly anyTaiga: boolean;
+  /**
+   * Offer people the tools that create and change items. Each person still decides at sign-in;
+   * turning this off takes the tools away from everyone at once, tokens already issued included.
+   */
+  readonly allowWrites: boolean;
   /** The address people reach this server at, e.g. https://taiga-mcp.example.com. No path. */
   readonly publicUrl: URL;
   /** Key material for everything the server seals. Changing it signs everyone out. */
@@ -29,11 +34,8 @@ function wholeNumber(env: Env, key: string, fallback: number): number {
 }
 
 export function loadRemoteConfig(env: Env = process.env): RemoteConfig {
-  const rawAny = read(env, 'ANY_TAIGA')?.toLowerCase();
-  if (rawAny !== undefined && !['true', 'false', '1', '0'].includes(rawAny)) {
-    throw new ConfigError('ANY_TAIGA must be true or false.');
-  }
-  const anyTaiga = rawAny === 'true' || rawAny === '1';
+  const anyTaiga = flag(env, 'ANY_TAIGA');
+  const allowWrites = flag(env, 'ALLOW_WRITES');
 
   const rawTaiga = read(env, 'TAIGA_URL');
   if (!rawTaiga && !anyTaiga) {
@@ -74,6 +76,7 @@ export function loadRemoteConfig(env: Env = process.env): RemoteConfig {
   return {
     taigaUrl: rawTaiga ? normalizeBaseUrl(rawTaiga) : undefined,
     anyTaiga,
+    allowWrites,
     publicUrl,
     secret,
     port: wholeNumber(env, 'PORT', 3000),

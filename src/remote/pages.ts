@@ -11,6 +11,13 @@ const TEXT = {
       `${app} is asking to read your Taiga projects at ${host}. It can only read: nothing in Taiga will be changed.`,
     wantsAny: (app: string) =>
       `${app} is asking to read your Taiga projects. It can only read: nothing in Taiga will be changed.`,
+    wantsWrite: (app: string, host: string) =>
+      `${app} is asking for access to your Taiga projects at ${host}. It can read them, and change them only if you tick the box below.`,
+    wantsWriteAny: (app: string) =>
+      `${app} is asking for access to your Taiga projects. It can read them, and change them only if you tick the box below.`,
+    allowWrite: 'Also let it create items, change them and comment, as me',
+    allowWriteHint:
+      'Changes appear in Taiga under your name. Nothing can be deleted. Leave it unticked to allow reading only.',
     anApp: 'An app',
     address: 'Taiga address',
     addressHint: 'The address you open Taiga at. For Taiga cloud: tree.taiga.io',
@@ -32,6 +39,14 @@ const TEXT = {
     description:
       'Connect Claude or any MCP app to Taiga and ask about projects, sprints, user stories, tasks and issues in plain words. Read-only, with your own Taiga account.',
     readOnly: 'Read-only',
+    readWrite: 'Reads · writes if you allow',
+    descriptionWrite:
+      'Connect Claude or any MCP app to Taiga and ask about projects, sprints, user stories, tasks and issues in plain words, or have it create and update them. With your own Taiga account.',
+    writeFact: [
+      'Changes only if you allow',
+      'Reading by default. Creating, changing and commenting only if you tick a box at sign-in. Nothing can be deleted.',
+    ],
+    writeExample: 'Create a task “Write the release notes” on story 42 and assign it to me.',
     homeLead: (host: string) =>
       `Ask Claude, or another AI assistant, about your projects, sprints, user stories, tasks, issues and wiki at ${host}, in plain words.`,
     homeLeadAny:
@@ -83,6 +98,13 @@ const TEXT = {
       `${app} xin quyền đọc các project Taiga của bạn tại ${host}. Chỉ đọc: không có gì trên Taiga bị thay đổi.`,
     wantsAny: (app: string) =>
       `${app} xin quyền đọc các project Taiga của bạn. Chỉ đọc: không có gì trên Taiga bị thay đổi.`,
+    wantsWrite: (app: string, host: string) =>
+      `${app} xin quyền truy cập các project Taiga của bạn tại ${host}. Ứng dụng được đọc, và chỉ được sửa nếu bạn tick ô bên dưới.`,
+    wantsWriteAny: (app: string) =>
+      `${app} xin quyền truy cập các project Taiga của bạn. Ứng dụng được đọc, và chỉ được sửa nếu bạn tick ô bên dưới.`,
+    allowWrite: 'Cho phép cả tạo mục mới, sửa và bình luận dưới tên tôi',
+    allowWriteHint:
+      'Mọi thay đổi hiện trên Taiga dưới tên bạn. Không xóa được gì. Để trống nếu chỉ cho phép đọc.',
     anApp: 'Một ứng dụng',
     address: 'Địa chỉ Taiga',
     addressHint: 'Địa chỉ bạn vẫn mở Taiga. Với Taiga cloud: tree.taiga.io',
@@ -104,6 +126,14 @@ const TEXT = {
     description:
       'Kết nối Claude hoặc ứng dụng MCP bất kỳ với Taiga để hỏi về project, sprint, user story, task và issue bằng lời bình thường. Chỉ đọc, dùng chính tài khoản Taiga của bạn.',
     readOnly: 'Chỉ đọc',
+    readWrite: 'Đọc · sửa nếu bạn cho phép',
+    descriptionWrite:
+      'Kết nối Claude hoặc ứng dụng MCP bất kỳ với Taiga để hỏi về project, sprint, user story, task và issue bằng lời bình thường, hoặc nhờ tạo và cập nhật chúng. Dùng chính tài khoản Taiga của bạn.',
+    writeFact: [
+      'Chỉ sửa khi bạn cho phép',
+      'Mặc định chỉ đọc. Chỉ tạo, sửa và bình luận nếu bạn tick một ô khi đăng nhập. Không xóa được gì.',
+    ],
+    writeExample: 'Tạo task “Viết release note” cho story 42 và giao cho mình.',
     homeLead: (host: string) =>
       `Hỏi Claude, hoặc trợ lý AI khác, về project, sprint, user story, task, issue và wiki của bạn tại ${host}, bằng lời bình thường.`,
     homeLeadAny:
@@ -218,6 +248,9 @@ label { display: block; margin: 0 0 14px; font-size: 14px; font-weight: 600; }
 input { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; font: inherit; color: inherit;
   background: transparent; border: 1px solid var(--field); border-radius: 10px; }
 input:focus-visible, button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.check { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; font-weight: 600;
+  background: var(--inset); border-radius: 10px; }
+.check input { flex: none; width: 18px; height: 18px; margin: 2px 0 0; padding: 0; accent-color: var(--primary); }
 button { width: 100%; margin: 6px 0 16px; padding: 11px 16px; font: inherit; font-weight: 600; cursor: pointer;
   color: #ffffff; background: var(--primary); border: 0; border-radius: 10px; }
 button:hover { background: var(--primary-hover); }
@@ -335,6 +368,10 @@ export interface LoginView {
   readonly error?: LoginError | undefined;
   /** What was typed before, so a wrong password does not empty the form. */
   readonly username?: string | undefined;
+  /** Offer the box that allows changes. */
+  readonly mayWrite?: boolean;
+  /** The box was ticked before, so a wrong password does not untick it. */
+  readonly write?: boolean;
 }
 
 export function loginPage(view: LoginView): string {
@@ -358,7 +395,15 @@ export function loginPage(view: LoginView): string {
     t.signInTitle,
     `${brand()}
 <h1>${escape(t.signInTitle)}</h1>
-<p>${escape(view.fixedHost === undefined ? t.wantsAny(app) : t.wants(app, view.fixedHost))}</p>
+<p>${escape(
+      view.mayWrite
+        ? view.fixedHost === undefined
+          ? t.wantsWriteAny(app)
+          : t.wantsWrite(app, view.fixedHost)
+        : view.fixedHost === undefined
+          ? t.wantsAny(app)
+          : t.wants(app, view.fixedHost),
+    )}</p>
 <p class="returns">${escape(returns)} ${escape(t.onlyIfYou)}</p>
 ${view.error ? `<p class="error" role="alert">${escape(t[view.error])}</p>` : ''}
 <form method="post" action="/login">
@@ -369,7 +414,12 @@ ${asksAddress ? addressField : ''}<label>${escape(t.username)}
 <label>${escape(t.password)}
 <input name="password" type="password" autocomplete="current-password" required>
 </label>
-<button type="submit">${escape(t.submit)}</button>
+${
+  view.mayWrite
+    ? `<label class="check"><input type="checkbox" name="write"${view.write ? ' checked' : ''}><span>${escape(t.allowWrite)}<small>${escape(t.allowWriteHint)}</small></span></label>
+`
+    : ''
+}<button type="submit">${escape(t.submit)}</button>
 </form>
 <p class="note">${escape(t.passwordNote)}</p>`,
   );
@@ -419,8 +469,12 @@ export function homePage(
   fixedHost: string | undefined,
   publicUrl: URL,
   chosen?: Lang | undefined,
+  /** The server offers changes to whoever allows them at sign-in. */
+  allowWrites = false,
 ): string {
   const t = TEXT[lang];
+  const facts = allowWrites ? [t.writeFact, ...t.facts.slice(1)] : t.facts;
+  const examples = allowWrites ? [...t.examples, t.writeExample] : t.examples;
   const at = (path: string) => new URL(path, publicUrl).href;
   const [copy, add, signIn, ask] = t.steps;
   const steps = [add, fixedHost === undefined ? t.signInStepAny : signIn, ask];
@@ -429,11 +483,11 @@ export function homePage(
   return page(
     lang,
     t.pageTitle,
-    `${brand(`<span class="pill">${escape(t.readOnly)}</span><nav class="lang" aria-label="Language">${language('en', 'English')}${language('vi', 'Tiếng Việt')}</nav>`)}
+    `${brand(`<span class="pill">${escape(allowWrites ? t.readWrite : t.readOnly)}</span><nav class="lang" aria-label="Language">${language('en', 'English')}${language('vi', 'Tiếng Việt')}</nav>`)}
 <h1>${escape(t.homeTitle)}</h1>
 <p class="lead">${escape(fixedHost === undefined ? t.homeLeadAny : t.homeLead(fixedHost))}</p>
 <ul class="facts">
-${t.facts.map(([name, what]) => `<li><strong>${escape(name)}</strong>${escape(what)}</li>`).join('\n')}
+${facts.map(([name, what]) => `<li><strong>${escape(name)}</strong>${escape(what)}</li>`).join('\n')}
 </ul>
 <h2>${escape(t.connect)}</h2>
 <ol>
@@ -442,7 +496,7 @@ ${steps.map((step) => `<li>${escape(step)}</li>`).join('\n')}
 </ol>
 <h2>${escape(t.asks)}</h2>
 <ul class="asks">
-${t.examples.map((example) => `<li>${escape(example)}</li>`).join('\n')}
+${examples.map((example) => `<li>${escape(example)}</li>`).join('\n')}
 </ul>
 <h2>${escape(t.otherApps)}</h2>
 <p class="note">${escape(t.otherAppsLead)}</p>
@@ -453,7 +507,7 @@ ${otherApps(t.howTo, at('/mcp')).join('\n')}
     {
       wide: true,
       listed: {
-        description: t.description,
+        description: allowWrites ? t.descriptionWrite : t.description,
         url: at(chosen === undefined ? '/' : `/?lang=${chosen}`),
         alternates: { en: at('/?lang=en'), vi: at('/?lang=vi'), default: at('/') },
         image: at('/og.png'),

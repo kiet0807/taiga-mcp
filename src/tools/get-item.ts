@@ -65,12 +65,14 @@ export function registerGetItem(server: McpServer, taiga: TaigaClient): void {
           changes: args.changes,
           changesPage: args.changes_page,
         }),
+        taiga.writable,
       ),
     ),
   );
 }
 
-function describe(item: ItemDetail): string {
+/** `writable`: also give the version a change must be based on. */
+function describe(item: ItemDetail, writable: boolean): string {
   const facts: (readonly [string, string | undefined])[] = [
     ['Project', item.project],
     ['Status', status(item)],
@@ -80,6 +82,10 @@ function describe(item: ItemDetail): string {
     ['Tags', item.tags.join(', ') || undefined],
     ['Created', item.created && `${item.created}${item.createdBy ? ` by ${item.createdBy}` : ''}`],
     ['Last changed', item.modified],
+    [
+      'Version',
+      writable && item.version !== undefined ? `${item.version} (pass it to update_item)` : undefined,
+    ],
   ];
   const sections = [
     `${KIND[item.kind]} #${item.ref}: ${item.subject}`,

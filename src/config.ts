@@ -12,6 +12,11 @@ export interface TaigaConfig {
    * names the environment variables, which means nothing to someone using the hosted server.
    */
   readonly expiredHint?: string;
+  /**
+   * Allow the tools that create and change items, and comment. Off unless asked for. Nothing can
+   * be deleted either way: the server has no way to send a delete.
+   */
+  readonly write?: boolean;
 }
 
 /** A problem with the environment variables. The message says what to set; it never echoes a secret. */
@@ -25,6 +30,14 @@ export type Env = Readonly<Record<string, string | undefined>>;
 export function read(env: Env, key: string): string | undefined {
   const value = env[key]?.trim();
   return value ? value : undefined;
+}
+
+/** A switch: true or false (also 1 or 0), off when unset. */
+export function flag(env: Env, key: string): boolean {
+  const raw = read(env, key)?.toLowerCase();
+  if (raw === undefined) return false;
+  if (!['true', 'false', '1', '0'].includes(raw)) throw new ConfigError(`${key} must be true or false.`);
+  return raw === 'true' || raw === '1';
 }
 
 export function normalizeBaseUrl(raw: string): string {
@@ -60,11 +73,13 @@ export function loadConfig(env: Env = process.env): TaigaConfig {
   if (username === undefined && token === undefined) {
     throw new ConfigError('No way to sign in: set TAIGA_USERNAME and TAIGA_PASSWORD, or TAIGA_TOKEN.');
   }
+  const write = flag(env, 'TAIGA_WRITE');
 
   return {
     baseUrl,
     ...(username !== undefined && password !== undefined ? { credentials: { username, password } } : {}),
     ...(token !== undefined ? { token } : {}),
     ...(refreshToken !== undefined ? { refreshToken } : {}),
+    ...(write ? { write } : {}),
   };
 }

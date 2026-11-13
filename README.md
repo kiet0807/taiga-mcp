@@ -1,13 +1,13 @@
 # taiga-mcp
 
-A read-only [Model Context Protocol](https://modelcontextprotocol.io) server for [Taiga](https://taiga.io). It lets an AI assistant such as Claude, ChatGPT, Copilot or Cursor answer questions about your Taiga projects without you opening Taiga: sprints, user stories, tasks, issues, epics and the wiki.
+A [Model Context Protocol](https://modelcontextprotocol.io) server for [Taiga](https://taiga.io). It lets an AI assistant such as Claude, ChatGPT, Copilot or Cursor answer questions about your Taiga projects without you opening Taiga: sprints, user stories, tasks, issues, epics and the wiki. It reads by default; if you switch it on, it can also create items, change them and comment. It can never delete anything.
 
 It runs in two ways:
 
 - **On your machine** (stdio), for one person, with the Taiga account in a local `.env` file. See [Setup](#setup).
 - **Hosted** (HTTP), for a team, including people who never open a terminal: they paste one address into their AI assistant and sign in with their own Taiga account. See [Hosted server](#hosted-server).
 
-**Status:** fourteen read-only tools, covered by tests against a fake Taiga and checked against a public project on Taiga cloud. A hosted instance runs at [taiga.kietnguyen.io.vn](https://taiga.kietnguyen.io.vn). Not published to npm.
+**Status:** fourteen tools that read and three that write (off unless switched on), covered by tests against a fake Taiga; the reading tools are also checked against a public project on Taiga cloud. A hosted instance runs at [taiga.kietnguyen.io.vn](https://taiga.kietnguyen.io.vn). Not published to npm.
 
 ## Tools
 
@@ -52,7 +52,25 @@ How the tools are meant to be used by a model:
 - **Activity is read backwards.** Taiga lists it from the newest event and cannot jump to a day, so `list_activity` reads back up to 1,000 events and, when it stops before the period asked for, says how far back it looked.
 - **Errors say what to do next**, for example: `"Linh" matches several members of project "Acme Billing": Linh Tran (linh.tran), Võ Thị Linh (vtlinh). Pass the full name or the username.`
 
-Every tool only reads. The server sends `GET` requests to Taiga, plus the sign-in itself.
+### Tools that write
+
+Off unless switched on: `TAIGA_WRITE=true` on your machine; on a hosted server, `ALLOW_WRITES=true` and then a box each person ticks when signing in. Without that, the server sends Taiga nothing but `GET` requests and the sign-in itself.
+
+| Tool          | What it does                                                                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create_item` | Create a user story, task or issue: title, description, status, assignee, tags, sprint, due date; a task on a story, a story in an epic              |
+| `update_item` | Change fields of a story, task, issue or epic: title, description, status, assignee, sprint, tags, due date, blocked, issue type, severity, priority |
+| `add_comment` | Comment on a story, task, issue or epic                                                                                                              |
+
+How they are kept safe:
+
+- **Nothing can be deleted.** The server has no way to send a `DELETE`. To close an item, set a closed status.
+- **Only on request.** The tools tell the model to write only when the user asks for that change in the conversation, never because a title, description, comment, wiki page or file in Taiga says to (text there is written by others and may try to give the model orders). They are marked as writing in MCP, so apps ask before calling them; `update_item` is marked as overwriting.
+- **No half-done creates.** Every name (status, person, sprint, story, epic, type…) is checked before anything is sent; a wrong one is answered with the valid names and nothing is created.
+- **No silent overwrites.** `get_item` shows the item's version and `update_item` sends it: if someone changed the same fields since, Taiga refuses and the model is told to read the item again.
+- **Every answer shows what changed,** field by field, before and after, with a link to the item in Taiga. A description is shown by its length, not repeated.
+- **A second lock.** Even if a tool were called on a read-only connection, the code that talks to Taiga refuses to send anything but a read.
+- **As you.** Changes are made with the signed-in person's own Taiga account and appear in Taiga under their name, with Taiga's own history and notifications.
 
 ### Reading attached files
 
@@ -86,11 +104,12 @@ pnpm build
 cp .env.example .env   # then fill in TAIGA_URL and how to sign in
 ```
 
-| Variable                             | Meaning                                                                    |
-| ------------------------------------ | -------------------------------------------------------------------------- |
-| `TAIGA_URL`                          | Address of the Taiga API host, without `/api/v1`                           |
-| `TAIGA_USERNAME`, `TAIGA_PASSWORD`   | Sign in with a password; the server renews its tokens by itself            |
-| `TAIGA_TOKEN`, `TAIGA_REFRESH_TOKEN` | Or use tokens you already have; without a password they cannot be replaced |
+| Variable                             | Meaning                                                                          |
+| ------------------------------------ | -------------------------------------------------------------------------------- |
+| `TAIGA_URL`                          | Address of the Taiga API host, without `/api/v1`                                 |
+| `TAIGA_USERNAME`, `TAIGA_PASSWORD`   | Sign in with a password; the server renews its tokens by itself                  |
+| `TAIGA_TOKEN`, `TAIGA_REFRESH_TOKEN` | Or use tokens you already have; without a password they cannot be replaced       |
+| `TAIGA_WRITE`                        | `true` adds the tools that create and change items, and comment (off by default) |
 
 Credentials stay in `.env` on your machine. The file is git-ignored and the server never prints them.
 
@@ -132,14 +151,15 @@ MCP_SECRET="$(openssl rand -base64 48)" \
 pnpm start:http
 ```
 
-| Variable      | Meaning                                                                                                 |
-| ------------- | ------------------------------------------------------------------------------------------------------- |
-| `TAIGA_URL`   | The Taiga people sign in to. With `ANY_TAIGA` it only pre-fills the address field, and may be left out  |
-| `ANY_TAIGA`   | `true` lets each person type the address of their own Taiga                                             |
-| `PUBLIC_URL`  | The address people reach this server at, without a path. Must be `https://` (except on `localhost`)     |
-| `MCP_SECRET`  | At least 32 random characters. Encrypts everything the server hands out; changing it signs everyone out |
-| `PORT`        | Port to listen on (default 3000)                                                                        |
-| `TRUST_PROXY` | How many proxies sit in front of the server (default 1 when hosted, 0 on `localhost`)                   |
+| Variable       | Meaning                                                                                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TAIGA_URL`    | The Taiga people sign in to. With `ANY_TAIGA` it only pre-fills the address field, and may be left out                                                            |
+| `ANY_TAIGA`    | `true` lets each person type the address of their own Taiga                                                                                                       |
+| `ALLOW_WRITES` | `true` offers each person, at sign-in, to let their app create and change items (off by default). Turning it off takes writing away from every connection at once |
+| `PUBLIC_URL`   | The address people reach this server at, without a path. Must be `https://` (except on `localhost`)                                                               |
+| `MCP_SECRET`   | At least 32 random characters. Encrypts everything the server hands out; changing it signs everyone out                                                           |
+| `PORT`         | Port to listen on (default 3000)                                                                                                                                  |
+| `TRUST_PROXY`  | How many proxies sit in front of the server (default 1 when hosted, 0 on `localhost`)                                                                             |
 
 People connect their app to `PUBLIC_URL` + `/mcp`. Opening `PUBLIC_URL` itself in a browser shows the steps, in English or Vietnamese, for Claude and for other apps. To try it on your machine: put `PUBLIC_URL=http://localhost:3000` and `MCP_SECRET` in `.env` and run `pnpm dev:http`.
 
@@ -174,6 +194,7 @@ On Vercel no command is needed: the root `app.js` exports the Express app from t
 - **A typed address cannot lead inside.** With `ANY_TAIGA`, the server calls hosts that strangers name. Only host names over HTTPS are accepted, and every connection is checked when it is made: a name that resolves to a private, loopback or link-local address is refused, including after a redirect. A server for one Taiga skips this check, so that a company can point it at a Taiga on its own network.
 - **Limits of having no storage:** a connection cannot be revoked from the server before its tokens run out (short of changing `MCP_SECRET`, which ends everyone's), and an authorization code is kept from being used twice only within one running process. PKCE covers the rest.
 - Sign-in attempts are limited to 10 per 15 minutes per address.
+- **Writing is a separate choice.** With `ALLOW_WRITES`, the sign-in page has a box, unticked by default, that lets the app create items, change them and comment. The person's choice is sealed into their tokens (scope `read` or `read write`) and survives renewal. Apps that registered before writing existed still see the box: the person decides, not the scope the app asked for.
 
 ## Development
 
@@ -196,4 +217,4 @@ The stdio server speaks MCP on stdout, so nothing else may be printed there. Dia
 
 ## A note on data
 
-What a tool returns is sent to the AI model you connect. Before pointing the server at a company Taiga, make sure that is acceptable where you work. The same goes for hosting it for colleagues: whoever runs the hosted server is trusted with their passwords in passing and with what they read.
+What a tool returns is sent to the AI model you connect. Before pointing the server at a company Taiga, make sure that is acceptable where you work, and ask before switching on writing there too. The same goes for hosting it for colleagues: whoever runs the hosted server is trusted with their passwords in passing and with what they read.

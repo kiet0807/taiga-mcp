@@ -12,6 +12,7 @@ try {
     console.error(
       `${SERVER_INFO.name} ${SERVER_INFO.version} listening on port ${config.port} ` +
         `(${config.anyTaiga ? 'any Taiga a person names' : `Taiga at ${config.taigaUrl}`}; ` +
+        `${config.allowWrites ? 'changes offered at sign-in' : 'read-only'}; ` +
         `connect apps to ${new URL('/mcp', config.publicUrl).href})`,
     );
   });

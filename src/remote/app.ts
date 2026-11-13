@@ -12,7 +12,7 @@ import { TaigaClient } from '../taiga/client.js';
 import { TaigaError } from '../taiga/http.js';
 import { guardedFetch } from './guard.js';
 import { expiredPage, homePage, loginPage, type Lang, type LoginError } from './pages.js';
-import { SCOPE, TaigaOAuthProvider } from './provider.js';
+import { READ, TaigaOAuthProvider, WRITE } from './provider.js';
 import { Sealer } from './seal.js';
 import { TaigaAuth } from './taiga-auth.js';
 
@@ -24,6 +24,8 @@ export interface AppOptions {
   readonly taigaUrl?: string | undefined;
   /** Let each person type the address of their own Taiga. */
   readonly anyTaiga?: boolean;
+  /** Offer each person, at sign-in, to allow creating and changing items. */
+  readonly allowWrites?: boolean;
   readonly publicUrl: URL;
   readonly secret: string;
   readonly trustProxy?: number;
@@ -89,6 +91,7 @@ function sendPage(res: Response, status: number, html: string): void {
  */
 export function createApp(options: AppOptions): Express {
   const anyTaiga = options.anyTaiga === true;
+  const allowWrites = options.allowWrites === true;
   const fixedTaiga = anyTaiga ? undefined : options.taigaUrl;
   if (!anyTaiga && fixedTaiga === undefined) throw new Error('taigaUrl is required unless anyTaiga is set');
   const fixedHost = fixedTaiga === undefined ? undefined : new URL(fixedTaiga).host;
@@ -103,6 +106,7 @@ export function createApp(options: AppOptions): Express {
     taigaAt: (baseUrl) => new TaigaAuth(baseUrl, fetchImpl),
     fixedTaiga,
     resource: mcpUrl,
+    allowWrites,
     now: seconds,
     showLogin: (res, view) =>
       sendPage(res, 200, loginPage({ lang: langOf(res.req), fixedHost, address: options.taigaUrl, ...view })),
@@ -120,13 +124,13 @@ export function createApp(options: AppOptions): Express {
       provider,
       issuerUrl: options.publicUrl,
       resourceServerUrl: mcpUrl,
-      scopesSupported: [SCOPE],
-      resourceName: fixedHost === undefined ? 'Taiga (read-only)' : `Taiga at ${fixedHost} (read-only)`,
+      scopesSupported: allowWrites ? [READ, WRITE] : [READ],
+      resourceName: `Taiga${fixedHost === undefined ? '' : ` at ${fixedHost}`}${allowWrites ? '' : ' (read-only)'}`,
     }),
   );
 
   const showLoginAgain = (req: Request, res: Response, status: number, error: LoginError) => {
-    const { request, username, address } = req.body as Record<string, string | undefined> & {
+    const { request, username, address, write } = req.body as Record<string, string | undefined> & {
       request: string;
     };
     const asker = provider.describeLogin(request);
@@ -137,7 +141,16 @@ export function createApp(options: AppOptions): Express {
     sendPage(
       res,
       status,
-      loginPage({ lang: langOf(req), fixedHost, address, ...asker, request, error, username }),
+      loginPage({
+        lang: langOf(req),
+        fixedHost,
+        address,
+        ...asker,
+        request,
+        error,
+        username,
+        write: write === 'on',
+      }),
     );
   };
 
@@ -161,7 +174,7 @@ export function createApp(options: AppOptions): Express {
       handler: (req, res) => showLoginAgain(req, res, 429, 'tooMany'),
     }),
     async (req: Request, res: Response) => {
-      const { request, username, password, address } = req.body as Record<string, unknown>;
+      const { request, username, password, address, write } = req.body as Record<string, unknown>;
       if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
         showLoginAgain(req, res, 400, 'rejected');
         return;
@@ -172,6 +185,8 @@ export function createApp(options: AppOptions): Express {
           username.trim(),
           password,
           typeof address === 'string' ? address : undefined,
+          // A ticked checkbox sends "on"; an unticked one sends nothing.
+          write === 'on',
         );
         if (outcome.kind === 'redirect') {
           res.set('Cache-Control', 'no-store').redirect(302, outcome.url);
@@ -218,14 +233,20 @@ export function createApp(options: AppOptions): Express {
   });
 
   app.post('/mcp', bearer, express.json({ limit: '1mb' }), async (req: Request, res: Response) => {
-    const { taigaUrl: baseUrl, taigaToken: token } = req.auth?.extra ?? {};
+    const { taigaUrl: baseUrl, taigaToken: token, write } = req.auth?.extra ?? {};
     if (typeof baseUrl !== 'string' || typeof token !== 'string') {
       res.status(401).json({ error: 'invalid_token' });
       return;
     }
     // A server and a Taiga client per request: nothing one person reads is kept for the next.
     const server = createServer(
-      new TaigaClient({ baseUrl, token, expiredHint: EXPIRED_HINT }, fetchImpl, now),
+      new TaigaClient({ baseUrl, token, expiredHint: EXPIRED_HINT, write: write === true }, fetchImpl, now),
+      allowWrites && write !== true
+        ? {
+            howToAllowWrites:
+              'disconnect the Taiga connector, connect it again, and tick the box on the sign-in page that allows changes.',
+          }
+        : {},
     );
     const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
     res.on('close', () => {
@@ -247,7 +268,7 @@ export function createApp(options: AppOptions): Express {
   /* -------------------------------- the rest -------------------------------- */
 
   app.get('/', (req: Request, res: Response) => {
-    sendPage(res, 200, homePage(langOf(req), fixedHost, options.publicUrl, chosenLang(req)));
+    sendPage(res, 200, homePage(langOf(req), fixedHost, options.publicUrl, chosenLang(req), allowWrites));
   });
 
   // Hosts that serve `public/` themselves (Vercel) answer these before the app is asked.

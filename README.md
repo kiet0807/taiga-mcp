@@ -102,7 +102,7 @@ People connect their app to `PUBLIC_URL` + `/mcp`. Opening `PUBLIC_URL` itself i
 
 Any host that runs a Node.js process works: `pnpm build`, then `pnpm start:http` with the variables above.
 
-On Vercel no command is needed: the root `app.ts` exports the Express app, which Vercel runs as one function. Import the repository, set `PUBLIC_URL`, `MCP_SECRET` and `ANY_TAIGA` (or `TAIGA_URL`) as environment variables, and add the domain. The server keeps nothing between requests, so it does not mind being started and stopped; the sign-in limit and the single use of a code (below) are then per running instance.
+On Vercel no command is needed: the root `app.js` exports the Express app from the compiled `dist/`, which Vercel runs as one function after its own `pnpm build`. Import the repository, set `PUBLIC_URL`, `MCP_SECRET` and `ANY_TAIGA` (or `TAIGA_URL`) as environment variables, and add the domain. The server keeps nothing between requests, so it does not mind being started and stopped; the sign-in limit and the single use of a code (below) are then per running instance.
 
 ### How signing in works
 
@@ -126,7 +126,7 @@ pnpm test    # tests only; Taiga is faked, no network or account needed
 - `src/taiga/client.ts` asks Taiga what the tools need: it turns slugs and names into ids, and trims the answers.
 - `src/tools/` holds one file per tool: its name, the description and arguments the model reads, and how the answer is worded.
 - `src/server.ts` registers the tools; `src/index.ts` connects the server to stdio.
-- `src/remote/` is the hosted server: `app.ts` (routes), `provider.ts` (the OAuth steps), `seal.ts` (encryption of what is handed out), `taiga-auth.ts` (sign-in and renewal at Taiga), `guard.ts` (what a typed Taiga address may be, and connections that stay on the public internet), `pages.ts` (the sign-in and front pages). `src/remote.ts` starts it; the root `app.ts` is the same app for hosts that want an exported Express app.
+- `src/remote/` is the hosted server: `app.ts` (routes), `provider.ts` (the OAuth steps), `seal.ts` (encryption of what is handed out), `taiga-auth.ts` (sign-in and renewal at Taiga), `guard.ts` (what a typed Taiga address may be, and connections that stay on the public internet), `pages.ts` (the sign-in and front pages). `src/remote.ts` starts it; the root `app.js` is the same app, taken from `dist/`, for hosts that want an exported Express app.
 - `test/acme.ts` is the invented project the tests run against.
 
 The stdio server speaks MCP on stdout, so nothing else may be printed there. Diagnostics go to stderr.

@@ -2,7 +2,8 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'node_modules'] },
+  // .vercel is local build output; private holds local-only scripts that are not committed.
+  { ignores: ['dist', 'node_modules', '.vercel', 'private'] },
   js.configs.recommended,
   ...tseslint.configs.strict,
   {

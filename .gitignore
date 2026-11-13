@@ -6,3 +6,10 @@ dist
 .env
 .env.*
 !.env.example
+
+# Local Vercel build output and project link.
+.vercel
+
+# Working notes and checks against a real Taiga: they name real projects. Never commit.
+HANDOFF.md
+private

@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { answer, list } from '../format.js';
 import type { TaigaClient } from '../taiga/client.js';
-import { limit, project, READ_ONLY } from './shared.js';
+import { limit, page, project, READ_ONLY } from './shared.js';
 
 export function registerListSprints(server: McpServer, taiga: TaigaClient): void {
   server.registerTool(
@@ -14,7 +14,7 @@ export function registerListSprints(server: McpServer, taiga: TaigaClient): void
         'how many of its stories are done, points done out of the total when the team estimates, and which ' +
         'sprint is running today. Open sprints by default; some teams never close sprints, so an old sprint ' +
         'can still be open with unfinished stories. Use it for sprint dates and progress, or to find a sprint name; ' +
-        'for the stories inside a sprint call list_user_stories with `sprint`.',
+        'for the stories or tasks inside a sprint call list_user_stories or list_tasks with `sprint`.',
       inputSchema: {
         project,
         closed: z
@@ -22,6 +22,7 @@ export function registerListSprints(server: McpServer, taiga: TaigaClient): void
           .optional()
           .describe('true: list finished sprints instead of open ones. Default false.'),
         limit,
+        page,
       },
       annotations: READ_ONLY,
     },
@@ -31,6 +32,8 @@ export function registerListSprints(server: McpServer, taiga: TaigaClient): void
         scope: [sprints.project, args.closed ? 'closed sprints' : 'open sprints'],
         noun: ['sprint', 'sprints'],
         total: sprints.total,
+        limit: args.limit,
+        page: args.page,
         lines: sprints.items.map((sprint) =>
           [
             `- ${sprint.name}`,

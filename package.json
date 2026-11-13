@@ -1,6 +1,6 @@
 {
   "name": "taiga-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A read-only Model Context Protocol server for Taiga: ask an AI assistant about your projects, sprints, user stories, issues and epics.",
   "type": "module",
   "private": true,

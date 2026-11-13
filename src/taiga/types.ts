@@ -27,6 +27,8 @@ export interface RawProject {
 interface RawNamed {
   readonly id: number;
   readonly name: string;
+  /** On statuses: items in this status count as done. */
+  readonly is_closed?: boolean;
 }
 
 /** `GET /projects/by_slug`: the project together with the names its items refer to by id. */
@@ -34,6 +36,7 @@ export interface RawProjectDetail extends RawProject {
   readonly us_statuses?: readonly RawNamed[];
   readonly issue_statuses?: readonly RawNamed[];
   readonly epic_statuses?: readonly RawNamed[];
+  readonly task_statuses?: readonly RawNamed[];
   readonly severities?: readonly RawNamed[];
   readonly priorities?: readonly RawNamed[];
   readonly issue_types?: readonly RawNamed[];
@@ -41,6 +44,21 @@ export interface RawProjectDetail extends RawProject {
   readonly userstory_custom_attributes?: readonly RawNamed[];
   readonly issue_custom_attributes?: readonly RawNamed[];
   readonly epic_custom_attributes?: readonly RawNamed[];
+  readonly task_custom_attributes?: readonly RawNamed[];
+  readonly members?: readonly {
+    readonly id: number;
+    readonly username: string;
+    readonly full_name_display?: string;
+    readonly full_name?: string;
+    readonly role_name?: string;
+  }[];
+  /** The tags used on items of the project, each with its colour. */
+  readonly tags_colors?: Readonly<Record<string, string | null>> | null;
+  readonly is_backlog_activated?: boolean;
+  readonly is_kanban_activated?: boolean;
+  readonly is_issues_activated?: boolean;
+  readonly is_epics_activated?: boolean;
+  readonly is_wiki_activated?: boolean;
 }
 
 export interface RawSprint {
@@ -72,17 +90,22 @@ interface RawItem {
   readonly created_date?: string;
   readonly modified_date?: string;
   readonly tags?: readonly RawTag[] | null;
+  readonly due_date?: string | null;
   /** Only when a single item is read. */
   readonly description?: string;
 }
 
 export interface RawStory extends RawItem {
+  /** When the story was closed. */
+  readonly finish_date?: string | null;
   readonly milestone_name?: string | null;
   readonly total_points?: number | null;
   readonly epics?: readonly { readonly ref: number; readonly subject: string }[] | null;
 }
 
 export interface RawIssue extends RawItem {
+  /** When the issue was closed. */
+  readonly finished_date?: string | null;
   readonly severity?: number | null;
   readonly priority?: number | null;
   readonly type?: number | null;
@@ -91,6 +114,15 @@ export interface RawIssue extends RawItem {
 export interface RawEpic extends RawItem {
   /** `progress` is the number of stories done; it can be fractional. */
   readonly user_stories_counts?: { readonly total: number; readonly progress: number } | null;
+}
+
+export interface RawTask extends RawItem {
+  /** The story the task belongs to. A task can also stand alone in a sprint. */
+  readonly user_story_extra_info?: { readonly ref: number; readonly subject: string } | null;
+  /** Id of the sprint. */
+  readonly milestone?: number | null;
+  /** When the task was closed. */
+  readonly finished_date?: string | null;
 }
 
 /** `GET /resolver`: which kind of item a reference number belongs to, and its id. */
@@ -110,6 +142,40 @@ export interface RawHistoryEntry {
   readonly created_at: string;
   readonly comment?: string;
   readonly delete_comment_date?: string | null;
+  /** What changed, per field: `[before, after]`, or one level deeper for points per role. */
+  readonly values_diff?: Readonly<Record<string, unknown>> | null;
+}
+
+export interface RawAttachment {
+  readonly name: string;
+  /** Bytes. */
+  readonly size?: number | null;
+  readonly url?: string | null;
+  readonly description?: string | null;
+  readonly is_deprecated?: boolean;
+}
+
+export interface RawWikiPage {
+  readonly slug: string;
+  readonly content?: string | null;
+  readonly created_date?: string;
+  readonly modified_date?: string;
+  /** How many times the page was saved. */
+  readonly editions?: number;
+  /** Id of the member who saved it last. */
+  readonly last_modifier?: number | null;
+}
+
+/** An entry of the wiki's side menu: the title people see for a page. */
+export interface RawWikiLink {
+  readonly title: string;
+  /** The slug of the page. */
+  readonly href: string;
+}
+
+/** `GET /search`: matches of every kind. Only the wiki pages are read from it. */
+export interface RawSearch {
+  readonly wikipages?: readonly { readonly slug: string }[];
 }
 
 /* --------------------------- what tools work with --------------------------- */
@@ -125,9 +191,21 @@ export interface ProjectSummary {
 export interface Named {
   readonly id: number;
   readonly name: string;
+  /** On statuses: items in this status count as done. */
+  readonly closed?: boolean;
 }
 
-export type ItemKind = 'story' | 'issue' | 'epic';
+export type ItemKind = 'story' | 'issue' | 'epic' | 'task';
+
+/** Someone who can be assigned work in a project. */
+export interface Member {
+  readonly id: number;
+  /** Full name as Taiga shows it. */
+  readonly name: string;
+  readonly username: string;
+  /** Role in the project, e.g. "Back" or "Product Owner". */
+  readonly role: string | undefined;
+}
 
 /** A project and the names needed to turn "In progress" into an id, and an id back into a name. */
 export interface Project {
@@ -140,14 +218,23 @@ export interface Project {
   readonly priorities: readonly Named[];
   readonly issueTypes: readonly Named[];
   readonly sprints: readonly (Named & { readonly slug: string })[];
+  readonly members: readonly Member[];
+  readonly description: string;
+  readonly isPrivate: boolean;
+  /** The tags used on items of the project. */
+  readonly tags: readonly string[];
+  /** The parts of Taiga the project has switched on: backlog, kanban, issues, epics, wiki. */
+  readonly modules: readonly string[];
 }
 
 /** One page of a list, with what the heading of the answer needs. */
 export interface Listing<T> {
   readonly project: string;
   readonly items: readonly T[];
-  /** How many items match, including those beyond `items`. */
+  /** How many items match, including those on other pages. */
   readonly total: number;
+  /** Whose items were asked for, in words: a member's full name, "me", or "nobody". */
+  readonly assignee?: string | undefined;
 }
 
 export interface SprintSummary {
@@ -176,9 +263,12 @@ interface ItemSummary {
 export interface StorySummary extends ItemSummary {
   readonly sprint: string | undefined;
   readonly points: number | undefined;
+  /** The day it was closed, YYYY-MM-DD. */
+  readonly finished: string | undefined;
 }
 
 export interface IssueSummary extends ItemSummary {
+  readonly finished: string | undefined;
   readonly type: string | undefined;
   readonly severity: string | undefined;
   readonly priority: string | undefined;
@@ -190,6 +280,29 @@ export interface EpicSummary extends ItemSummary {
   readonly storiesDone: number;
 }
 
+export interface TaskSummary extends ItemSummary {
+  /** Reference number of the story the task belongs to. */
+  readonly story: number | undefined;
+  readonly sprint: string | undefined;
+  readonly finished: string | undefined;
+}
+
+export interface Attachment {
+  readonly name: string;
+  /** Bytes. */
+  readonly size: number | undefined;
+  readonly url: string | undefined;
+  readonly note: string | undefined;
+}
+
+/** One entry of an item's history: who changed what, in words. */
+export interface Change {
+  readonly author: string;
+  /** YYYY-MM-DD. */
+  readonly date: string;
+  readonly what: string;
+}
+
 export interface Comment {
   readonly author: string;
   /** YYYY-MM-DD. */
@@ -197,7 +310,7 @@ export interface Comment {
   readonly text: string;
 }
 
-/** One story, issue or epic in full. */
+/** One story, issue, epic or task in full. */
 export interface ItemDetail extends ItemSummary {
   readonly kind: ItemKind;
   readonly project: string;
@@ -210,7 +323,38 @@ export interface ItemDetail extends ItemSummary {
   /** Kind-specific facts, already as label and value: sprint, points, severity, progress… */
   readonly facts: readonly (readonly [label: string, value: string])[];
   readonly customFields: readonly (readonly [name: string, value: string])[];
-  /** Newest first. */
-  readonly comments: readonly Comment[];
+  /** Newest first. Undefined when no comments were asked for. */
+  readonly comments: readonly Comment[] | undefined;
   readonly totalComments: number;
+  /** Of a user story: all its tasks. */
+  readonly tasks: readonly TaskSummary[] | undefined;
+  readonly attachments: readonly Attachment[];
+  /** Newest first. Only when the history was asked for. */
+  readonly changes: readonly Change[] | undefined;
+  readonly totalChanges: number;
+}
+
+/** What a project is made of: the people, and the names its items use. */
+export interface ProjectOverview extends Omit<Project, 'id' | 'sprints' | 'customFields'> {
+  readonly customFields: Readonly<Record<ItemKind, readonly string[]>>;
+  readonly openSprints: number;
+  readonly closedSprints: number;
+}
+
+export interface WikiPageSummary {
+  /** What get_wiki_page takes. */
+  readonly slug: string;
+  /** The title in the wiki's menu, when the page is listed there. */
+  readonly title: string | undefined;
+  readonly modified: string | undefined;
+  readonly edits: number;
+  /** Characters of text. */
+  readonly length: number;
+}
+
+export interface WikiPage extends WikiPageSummary {
+  readonly project: string;
+  readonly content: string;
+  readonly created: string | undefined;
+  readonly modifiedBy: string | undefined;
 }

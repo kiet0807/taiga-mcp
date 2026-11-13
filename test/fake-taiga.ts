@@ -15,10 +15,18 @@ export function json(data: unknown, status = 200, headers: Record<string, string
   });
 }
 
-/** A list the way Taiga pages it: `page_size` items, and the full count in a header. */
+/**
+ * A list the way Taiga pages it: `page_size` items of the asked `page`, the full count in a
+ * header, and 404 for a page after the last one.
+ */
 export function paged(items: readonly unknown[], call: Call): Response {
   const size = Number(call.query['page_size'] ?? 30);
-  return json(items.slice(0, size), 200, { 'x-pagination-count': String(items.length) });
+  const page = Number(call.query['page'] ?? 1);
+  const start = (page - 1) * size;
+  if (page > 1 && start >= items.length) {
+    return json({ _error_message: "Page is not 'last', nor can it be converted to an int." }, 404);
+  }
+  return json(items.slice(start, start + size), 200, { 'x-pagination-count': String(items.length) });
 }
 
 export function fakeTaiga(handler: (call: Call, calls: readonly Call[]) => Response) {

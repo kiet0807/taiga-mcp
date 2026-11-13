@@ -15,7 +15,7 @@ export class TaigaError extends Error {
 
 export type Query = Readonly<Record<string, string | number | boolean | undefined>>;
 
-/** The first items of a long list, and how many items the list has in all. */
+/** One page of a long list, and how many items the list has in all. */
 export interface Page<T> {
   readonly items: T[];
   readonly total: number;
@@ -51,9 +51,25 @@ export class TaigaHttp {
     return (await response.json()) as T;
   }
 
-  /** The first `limit` items of a list that may be long. Taiga reports the full count in a header. */
-  async page<T>(path: string, query: Query, limit: number): Promise<Page<T>> {
-    const response = await this.#request(path, { ...query, page_size: limit }, {});
+  /**
+   * `limit` items of a list that may be long: the first ones, or those of a later `page`.
+   * Taiga reports the full count in a header.
+   */
+  async page<T>(path: string, query: Query, limit: number, page = 1): Promise<Page<T>> {
+    const paging = page > 1 ? { page_size: limit, page } : { page_size: limit };
+    let response: Response;
+    try {
+      response = await this.#request(path, { ...query, ...paging }, {});
+    } catch (error) {
+      // Taiga answers 404 for a page after the last one.
+      if (page > 1 && error instanceof TaigaError && error.status === 404) {
+        throw new TaigaError(
+          `The list has no page ${page} at ${limit} items a page. Call again with \`page\`: 1 to see how many items there are.`,
+          404,
+        );
+      }
+      throw error;
+    }
     const items = (await response.json()) as T[];
     const count = Number(response.headers.get('x-pagination-count') ?? Number.NaN);
     return { items, total: Number.isFinite(count) ? Math.max(count, items.length) : items.length };

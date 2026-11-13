@@ -18,7 +18,27 @@ export const limit = z
   .max(MAX_LIMIT)
   .default(DEFAULT_LIMIT)
   .describe(
-    `Most items to return (default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}). The answer says how many more exist.`,
+    `Most items to return in one answer (default ${DEFAULT_LIMIT}, at most ${MAX_LIMIT}). The answer says how many more exist.`,
+  );
+
+export const page = z
+  .number()
+  .int()
+  .min(1)
+  .default(1)
+  .describe(
+    'Which part of a long list, counted from 1. When an answer says more items exist, call again with ' +
+      'the next page and the same `limit` and filters.',
+  );
+
+export const search = z
+  .string()
+  .max(200)
+  .optional()
+  .describe(
+    'Words to look for in titles, descriptions and tags, e.g. "invoice export". An item must contain ' +
+      'every word; a word also matches the beginning of a longer one. Use it when the user describes ' +
+      'an item instead of giving its number.',
   );
 
 export const closed = z
@@ -32,6 +52,41 @@ export const assignedToMe = z
   .boolean()
   .optional()
   .describe('true: only items assigned to the signed-in user ("my stories", "assigned to me").');
+
+export const tag = z
+  .string()
+  .min(1)
+  .optional()
+  .describe('Only items that carry this tag, e.g. "backend". get_project lists the tags of a project.');
+
+const dayOf = (what: string) =>
+  z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+    .optional()
+    .describe(what);
+
+/** A range of days an item was created in. For "created this month", "new since Monday". */
+export const createdFrom = dayOf('Only items created on or after this day, as YYYY-MM-DD (UTC).');
+export const createdTo = dayOf('Only items created on or before this day, as YYYY-MM-DD (UTC).');
+
+/** A range of days an item was closed in. For "what was finished in October", "done last week". */
+export const finishedFrom = dayOf(
+  'Only items closed on or after this day, as YYYY-MM-DD (UTC). Items still open are left out.',
+);
+export const finishedTo = dayOf(
+  'Only items closed on or before this day, as YYYY-MM-DD (UTC). Items still open are left out.',
+);
+
+export const assignedTo = z
+  .string()
+  .min(1)
+  .optional()
+  .describe(
+    'Only items assigned to this person: full name or username as in Taiga; part of the name is enough ' +
+      'when it fits one member only, and accents may be left out. "unassigned" for items assigned to nobody. ' +
+      'A name that does not fit is answered with the members. For the signed-in user use `assigned_to_me`.',
+  );
 
 export const statusName = (example: string) =>
   z

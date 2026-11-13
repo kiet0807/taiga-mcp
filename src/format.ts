@@ -37,24 +37,47 @@ export function plural(count: number, one: string, many = `${one}s`): string {
 
 /**
  * A list as the model reads it: a heading that repeats which filters were applied, one line
- * per item, and, when the list was cut at `limit`, how many items are missing and what to do.
+ * per item, and, when the list does not fit in one answer, which part this is and how to get
+ * the rest.
  */
 export function list(options: {
   /** The project and the filters, e.g. `Billing · sprint "Sprint 12" · open only`. */
-  readonly scope: readonly (string | undefined)[];
+  readonly scope: readonly (string | undefined | false)[];
   readonly noun: readonly [one: string, many: string];
   readonly lines: readonly string[];
   readonly total: number;
+  /** The `limit` and `page` the tool was called with. */
+  readonly limit: number;
+  readonly page: number;
 }): string {
-  const { lines, total, noun } = options;
-  const scope = options.scope.filter((part) => part !== undefined).join(' · ');
+  const { lines, total, noun, limit, page } = options;
+  const scope = options.scope.filter(Boolean).join(' · ');
   if (lines.length === 0) return `${scope}: no ${noun[1]} found.`;
-  if (lines.length >= total) return `${scope}: ${plural(total, ...noun)}.\n${lines.join('\n')}`;
-  return (
-    `${scope}: ${plural(total, ...noun)}, the first ${lines.length} shown.\n${lines.join('\n')}\n\n` +
-    `${total - lines.length} more not shown. Narrow the filters, or raise \`limit\` (at most ${MAX_LIMIT}).`
-  );
+  if (page === 1 && lines.length >= total) return `${scope}: ${plural(total, ...noun)}.\n${lines.join('\n')}`;
+
+  const first = (page - 1) * limit + 1;
+  const last = first + lines.length - 1;
+  const pages = Math.max(page, Math.ceil(total / limit));
+  const heading = `${scope}: ${plural(total, ...noun)}, ${first} to ${last} shown (page ${page} of ${pages}).`;
+  const rest =
+    last < total
+      ? `${total - last} more after these. For the next ones call again with \`page\`: ${page + 1} and the same \`limit\` and filters, or narrow the filters.`
+      : 'This is the last page.';
+  return `${heading}\n${lines.join('\n')}\n\n${rest}`;
 }
+
+/** "assigned to Linh Tran", for the heading of a list. */
+export const assignedScope = (who: string | undefined) => who !== undefined && `assigned to ${who}`;
+
+/** `finished 2026-03-01 to 2026-03-31`, for the heading of a list. Either end may be open. */
+export function dateScope(what: string, from: string | undefined, to: string | undefined) {
+  if (from !== undefined && to !== undefined) return `${what} ${from} to ${to}`;
+  if (from !== undefined) return `${what} from ${from}`;
+  return to !== undefined && `${what} until ${to}`;
+}
+
+/** `matching "invoice export"`, for the heading of a list. */
+export const searchScope = (words: string | undefined) => !!words?.trim() && `matching "${words.trim()}"`;
 
 export const DEFAULT_LIMIT = 30;
 export const MAX_LIMIT = 100;
@@ -85,6 +108,13 @@ export function closedScope(closed: boolean | undefined): string | undefined {
 export function progress(done: number, total: number): string {
   if (total === 0) return 'no stories';
   return `${total} ${total === 1 ? 'story' : 'stories'}, ${Math.round((done / total) * 100)}% done`;
+}
+
+/** A file's size as people say it: "84 KB", "1.2 MB". */
+export function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** Long text cut to `max` characters, saying how much was left out. */

@@ -39,11 +39,16 @@ describe('the MCP server', () => {
     const { tools } = await client.listTools();
     expect(tools.map((tool) => tool.name)).toEqual([
       'list_projects',
+      'get_project',
       'list_sprints',
       'list_user_stories',
+      'list_tasks',
       'list_issues',
       'list_epics',
       'get_item',
+      'search',
+      'list_wiki_pages',
+      'get_wiki_page',
     ]);
     for (const tool of tools) {
       expect(tool.annotations?.readOnlyHint, tool.name).toBe(true);
@@ -51,7 +56,7 @@ describe('the MCP server', () => {
     }
   });
 
-  it('describes every argument, and only `project` and `ref` are required', async () => {
+  it('describes every argument, and requires only what names the thing to read', async () => {
     const client = await connectTo(() => json([]));
     const { tools } = await client.listTools();
     for (const tool of tools) {
@@ -59,9 +64,13 @@ describe('the MCP server', () => {
       for (const [name, schema] of Object.entries(properties)) {
         expect(schema.description, `${tool.name}.${name}`).toBeTruthy();
       }
-      const required =
-        tool.name === 'list_projects' ? [] : tool.name === 'get_item' ? ['project', 'ref'] : ['project'];
-      expect(tool.inputSchema.required ?? [], tool.name).toEqual(required);
+      const required: Record<string, string[]> = {
+        list_projects: [],
+        get_item: ['project', 'ref'],
+        search: ['project', 'words'],
+        get_wiki_page: ['project', 'page'],
+      };
+      expect(tool.inputSchema.required ?? [], tool.name).toEqual(required[tool.name] ?? ['project']);
     }
   });
 
@@ -143,7 +152,7 @@ describe('list_user_stories', () => {
     );
   });
 
-  it('repeats the filters in the heading and says how many items were left out', async () => {
+  it('repeats the filters in the heading and says how to get the items that did not fit', async () => {
     const answer = await ask('list_user_stories', {
       sprint: 'current',
       closed: false,
@@ -152,11 +161,39 @@ describe('list_user_stories', () => {
     });
     expect(answer).toBe(
       [
-        'Acme Billing · current sprint "Sprint 7" · open only · assigned to me: 3 user stories, the first 1 shown.',
+        'Acme Billing · current sprint "Sprint 7" · open only · assigned to me: 3 user stories, 1 to 1 shown (page 1 of 3).',
         '- #41 Export invoices as PDF · In progress · Linh Tran · 5 pts',
         '',
-        '2 more not shown. Narrow the filters, or raise `limit` (at most 100).',
+        '2 more after these. For the next ones call again with `page`: 2 and the same `limit` and filters, or narrow the filters.',
       ].join('\n'),
+    );
+  });
+
+  it('answers a later page with where it is in the list, and says when it is the last', async () => {
+    expect(await ask('list_user_stories', { limit: 2, page: 2 })).toBe(
+      [
+        'Acme Billing: 3 user stories, 3 to 3 shown (page 2 of 2).',
+        '- #38 Monthly statement email · Done (closed) · Kiet · 3 pts · backlog',
+        '',
+        'This is the last page.',
+      ].join('\n'),
+    );
+  });
+
+  it('a page past the end is a tool error that says where to start', async () => {
+    const client = await connect(acme().fetch);
+    const result = await client.callTool({
+      name: 'list_user_stories',
+      arguments: { project: 'acme-billing', limit: 2, page: 9 },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/no page 9 at 2 items a page/);
+  });
+
+  it('names the epic, the person and the words in the heading', async () => {
+    const answer = await ask('list_user_stories', { epic: 12, assigned_to: 'tran', search: ' card ' });
+    expect(answer.split('\n')[0]).toBe(
+      'Acme Billing · epic #12 · assigned to Linh Tran · matching "card": 3 user stories.',
     );
   });
 
@@ -165,6 +202,160 @@ describe('list_user_stories', () => {
       call.path === '/userstories' ? paged([], call) : undefined,
     );
     expect(answer).toBe('Acme Billing · status "Done": no user stories found.');
+  });
+});
+
+describe('list_tasks', () => {
+  it('lists tasks one per line, with the story and sprint of each', async () => {
+    expect(await ask('list_tasks')).toBe(
+      [
+        'Acme Billing: 3 tasks.',
+        '- #70 Ask the bank for a sandbox key · In progress · Linh Tran · story #42 · Sprint 7',
+        '- #71 Schedule the three retries · New · unassigned · story #42 · Sprint 7 · BLOCKED',
+        '- #72 Rotate the API key · Closed (closed) · Kiet · no story',
+      ].join('\n'),
+    );
+  });
+
+  it('leaves the story and the sprint out of the lines when the heading names them', async () => {
+    const answer = await ask('list_tasks', { story: 42, sprint: 'Sprint 7', assigned_to: 'unassigned' });
+    expect(answer.split('\n').slice(0, 2)).toEqual([
+      'Acme Billing · story #42 · sprint "Sprint 7" · assigned to nobody: 2 tasks.',
+      '- #70 Ask the bank for a sandbox key · In progress · Linh Tran',
+    ]);
+  });
+});
+
+describe('counting', () => {
+  it('names every filter in the heading, and shows when each item was finished', async () => {
+    const answer = await ask('list_user_stories', {
+      assigned_to_me: true,
+      tag: 'backend',
+      created_from: '2026-01-01',
+      finished_from: '2026-02-01',
+      finished_to: '2026-02-28',
+      limit: 100,
+    });
+    const lines = answer.split('\n');
+    expect(lines[0]).toBe(
+      'Acme Billing · assigned to me · tag "backend" · created from 2026-01-01 · finished 2026-02-01 to 2026-02-28: 3 user stories.',
+    );
+    expect(lines[3]).toBe(
+      '- #38 Monthly statement email · Done (closed) · Kiet · 3 pts · backlog · finished 2026-02-20',
+    );
+  });
+
+  it('counts the epics of one person', async () => {
+    const answer = await ask('list_epics', { assigned_to: 'Linh Tran', closed: true, status: 'Done' });
+    expect(answer.split('\n')[0]).toBe(
+      'Acme Billing · status "Done" · closed only · assigned to Linh Tran: 2 epics.',
+    );
+  });
+});
+
+describe('get_project', () => {
+  it('describes the project, its people and the names its items use', async () => {
+    expect(await ask('get_project')).toBe(
+      [
+        'Project: Acme Billing (slug: acme-billing) · private',
+        'Description: Invoices and card payments for Acme.',
+        'Switched on: backlog, issues, epics, wiki',
+        'Sprints: 2 open, 1 closed',
+        '',
+        'Members (4):',
+        '- Kiet (kiet) · Back',
+        '- Linh Tran (linh.tran) · Front',
+        '- Võ Thị Linh (vtlinh) · QA',
+        '- Đỗ Minh Đức (duc) · Product Owner',
+        '',
+        'User story statuses: New, In progress, Done (closed)',
+        'Task statuses: New, In progress, Closed (closed)',
+        'Issue statuses: New, Needs Info, Closed (closed)',
+        'Epic statuses: In progress, Done (closed)',
+        'Issue types: Bug, Question',
+        'Severities: Minor, Critical',
+        'Priorities: Low, High',
+        'Tags (2 tags): backend, payments',
+        'Epic custom fields: Start date, End date, Budget',
+      ].join('\n'),
+    );
+  });
+});
+
+describe('the wiki tools', () => {
+  it('lists the pages', async () => {
+    expect(await ask('list_wiki_pages')).toBe(
+      [
+        'Acme Billing: 2 wiki pages.',
+        '- release-steps · "How we release" · changed 2026-03-01 · 4 edits · 60 characters',
+        '- home · changed 2026-01-05 · 1 edit · 8 characters',
+      ].join('\n'),
+    );
+  });
+
+  it('reads one page', async () => {
+    expect(await ask('get_wiki_page', { page: 'How we release' })).toBe(
+      [
+        'Wiki page "How we release" (slug: release-steps) of Acme Billing',
+        '',
+        'Last changed: 2026-03-01 by Linh Tran',
+        'Created: 2026-01-10',
+        'Edits: 4',
+        '',
+        '# Release',
+        '',
+        '1. Freeze the branch.',
+        '2. Run the payment checks.',
+      ].join('\n'),
+    );
+  });
+});
+
+describe('search', () => {
+  it('looks in every kind of item at once, and says where to get the rest', async () => {
+    expect(await ask('search', { words: 'card', limit: 2 })).toBe(
+      [
+        'Acme Billing · matching "card": 3 user stories, 3 tasks, 2 issues, 2 epics, 1 wiki page.',
+        '',
+        'User stories (2 of 3 shown; for all of them call list_user_stories with `search`):',
+        '- #41 Export invoices as PDF · In progress · Linh Tran',
+        '- #42 Retry failed card payments · New · unassigned',
+        '',
+        'Tasks (2 of 3 shown; for all of them call list_tasks with `search`):',
+        '- #70 Ask the bank for a sandbox key · In progress · Linh Tran',
+        '- #71 Schedule the three retries · New · unassigned',
+        '',
+        'Issues (2):',
+        '- #57 Total is wrong when a discount applies · New · Kiet',
+        '- #55 Which currencies are supported? · Closed (closed) · unassigned',
+        '',
+        'Epics (2):',
+        '- #12 Card payments · In progress · Linh Tran',
+        '- #9 Invoices · Done (closed) · unassigned',
+        '',
+        'Wiki pages (1; read one with get_wiki_page):',
+        '- release-steps · "How we release"',
+      ].join('\n'),
+    );
+  });
+
+  it('still answers when one kind cannot be searched', async () => {
+    const answer = await ask('search', { words: 'card' }, (call) =>
+      call.path === '/search' ? json({}, 500) : call.path === '/epics' ? paged([], call) : undefined,
+    );
+    expect(answer).toContain('0 epics, wiki pages not searched.');
+    expect(answer).toMatch(/Wiki pages: could not be searched \(Taiga answered 500/);
+    expect(answer).not.toContain('Epics');
+  });
+
+  it('a wrong project is one error, not five', async () => {
+    const client = await connect(acme().fetch);
+    const result = await client.callTool({
+      name: 'search',
+      arguments: { project: 'billing', words: 'card' },
+    });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/^No project with slug "billing"/);
   });
 });
 
@@ -201,6 +392,7 @@ describe('get_item', () => {
         'Project: Acme Billing',
         'Status: New',
         'Assigned to: unassigned',
+        'Due: 2026-03-13',
         'Sprint: Sprint 7',
         'Epics: #12 Card payments',
         'Blocked: Waiting for the bank sandbox',
@@ -211,11 +403,31 @@ describe('get_item', () => {
         'Description:',
         'When a card payment fails, retry it **three times** over 24 hours.',
         '',
+        'Tasks (2, 2 still open):',
+        '- #70 Ask the bank for a sandbox key · In progress · Linh Tran',
+        '- #71 Schedule the three retries · New · unassigned · BLOCKED',
+        '',
+        'Attachments (1):',
+        '- bank-reply.pdf · 84 KB · What the bank answered · https://taiga.example/files/bank-reply.pdf',
+        '',
         'Comments (2, newest first):',
         '- 2026-03-09 Linh Tran: Sandbox access is promised for Thursday.',
         '- 2026-03-05 Kiet: Blocked: the bank sandbox rejects our key.',
       ].join('\n'),
     );
+  });
+
+  it('reads fewer comments and the history on request', async () => {
+    const answer = await ask('get_item', { ref: 42, comments: 1, changes: true });
+    expect(answer.split('\n\n').slice(-2)).toEqual([
+      'Comments (latest 1 of 2, newest first):\n- 2026-03-09 Linh Tran: Sandbox access is promised for Thursday.',
+      [
+        'Changes (latest 2 of 3, newest first):',
+        '- 2026-03-06 Linh Tran: is blocked: false → true; blocked note edited',
+        '- 2026-03-02 Kiet: sprint: none → Sprint 7; assigned to: Linh Tran → none; points (Back): ? → 5',
+      ].join('\n'),
+    ]);
+    expect(await ask('get_item', { ref: 42, comments: 0 })).not.toContain('Comments');
   });
 
   it('reads an epic with its custom fields', async () => {
@@ -236,6 +448,27 @@ describe('get_item', () => {
         'Custom fields:',
         '- Start date: 2026-01-05',
         '- End date: 2026-02-27',
+        '',
+        'Comments: none.',
+      ].join('\n'),
+    );
+  });
+
+  it('reads a task with its story', async () => {
+    expect(await ask('get_item', { ref: 70 })).toBe(
+      [
+        'Task #70: Ask the bank for a sandbox key',
+        '',
+        'Project: Acme Billing',
+        'Status: In progress',
+        'Assigned to: Linh Tran',
+        'User story: #42 Retry failed card payments',
+        'Sprint: Sprint 7',
+        'Created: 2026-03-03 by Kiet',
+        'Last changed: 2026-03-09',
+        '',
+        'Description:',
+        'The key we have is rejected. Ask for one the sandbox accepts.',
         '',
         'Comments: none.',
       ].join('\n'),

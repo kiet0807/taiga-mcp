@@ -14,7 +14,14 @@ export const PROJECT = {
   id: 10,
   name: 'Acme Billing',
   slug: 'acme-billing',
+  description: 'Invoices and card payments for Acme.',
   is_private: true,
+  is_backlog_activated: true,
+  is_kanban_activated: false,
+  is_issues_activated: true,
+  is_epics_activated: true,
+  is_wiki_activated: true,
+  tags_colors: { payments: '#c00', backend: null },
   us_statuses: [
     { id: 1, name: 'New', is_closed: false },
     { id: 2, name: 'In progress', is_closed: false },
@@ -28,6 +35,11 @@ export const PROJECT = {
   epic_statuses: [
     { id: 21, name: 'In progress', is_closed: false },
     { id: 22, name: 'Done', is_closed: true },
+  ],
+  task_statuses: [
+    { id: 71, name: 'New', is_closed: false },
+    { id: 72, name: 'In progress', is_closed: false },
+    { id: 73, name: 'Closed', is_closed: true },
   ],
   severities: [
     { id: 31, name: 'Minor' },
@@ -52,6 +64,13 @@ export const PROJECT = {
     { id: 61, name: 'Start date' },
     { id: 62, name: 'End date' },
     { id: 63, name: 'Budget' },
+  ],
+  task_custom_attributes: [],
+  members: [
+    { id: 7, username: 'kiet', full_name_display: 'Kiet', role_name: 'Back' },
+    { id: 8, username: 'linh.tran', full_name_display: 'Linh Tran', role_name: 'Front' },
+    { id: 9, username: 'vtlinh', full_name_display: 'Võ Thị Linh', role_name: 'QA' },
+    { id: 11, username: 'duc', full_name_display: 'Đỗ Minh Đức', role_name: 'Product Owner' },
   ],
 };
 
@@ -126,6 +145,7 @@ export const STORIES = [
     milestone_name: null,
     total_points: 3,
     is_blocked: false,
+    finish_date: '2026-02-20T16:45:00.000Z',
   },
 ];
 
@@ -171,6 +191,51 @@ export const EPICS = [
   },
 ];
 
+const RETRY_STORY = { id: 1002, ref: 42, subject: 'Retry failed card payments', epics: null };
+
+export const TASKS = [
+  {
+    id: 4001,
+    ref: 70,
+    subject: 'Ask the bank for a sandbox key',
+    status_extra_info: status('In progress'),
+    assigned_to_extra_info: person('Linh Tran'),
+    user_story_extra_info: RETRY_STORY,
+    milestone: 101,
+    is_blocked: false,
+  },
+  {
+    id: 4002,
+    ref: 71,
+    subject: 'Schedule the three retries',
+    status_extra_info: status('New'),
+    assigned_to_extra_info: null,
+    user_story_extra_info: RETRY_STORY,
+    milestone: 101,
+    is_blocked: true,
+  },
+  {
+    id: 4003,
+    ref: 72,
+    subject: 'Rotate the API key',
+    status_extra_info: status('Closed', true),
+    assigned_to_extra_info: person('Kiet'),
+    user_story_extra_info: null,
+    milestone: null,
+    is_blocked: false,
+    finished_date: '2026-03-04T11:00:00.000Z',
+  },
+];
+
+const TASK_DETAIL = {
+  ...TASKS[0],
+  description: 'The key we have is rejected. Ask for one the sandbox accepts.',
+  owner_extra_info: person('Kiet'),
+  created_date: '2026-03-03T08:00:00.000Z',
+  modified_date: '2026-03-09T09:30:00.000Z',
+  tags: [],
+};
+
 const STORY_DETAIL = {
   ...STORIES[1],
   description: 'When a card payment fails, retry it **three times** over 24 hours.\n',
@@ -179,7 +244,69 @@ const STORY_DETAIL = {
   modified_date: '2026-03-09T10:00:00.000Z',
   tags: [['payments', '#c00'], 'backend'],
   epics: [{ id: 3001, ref: 12, subject: 'Card payments' }],
+  due_date: '2026-03-13',
 };
+
+/** Newest first. The second file was replaced by a newer one and is marked as such in Taiga. */
+const STORY_FILES = [
+  {
+    name: 'bank-reply.pdf',
+    size: 86_016,
+    url: 'https://taiga.example/files/bank-reply.pdf',
+    description: 'What the bank answered',
+    is_deprecated: false,
+  },
+  {
+    name: 'old-flow.png',
+    size: 2_400_000,
+    url: 'https://taiga.example/files/old-flow.png',
+    is_deprecated: true,
+  },
+];
+
+const change = (created_at: string, name: string, values_diff: Record<string, unknown>) => ({
+  created_at,
+  user: { name, username: 'x' },
+  comment: '',
+  delete_comment_date: null,
+  values_diff,
+});
+
+/** Newest first: what happened to story #42 besides the comments. */
+export const STORY_CHANGES = [
+  change('2026-03-06T08:00:00.000Z', 'Linh Tran', {
+    is_blocked: [false, true],
+    blocked_note_diff: [null, '<ins>Waiting</ins>'],
+    blocked_note_html: ['', '<p>Waiting</p>'],
+  }),
+  change('2026-03-04T10:00:00.000Z', 'Kiet', { sprint_order: [3, 1], backlog_order: [9, 2] }),
+  change('2026-03-02T09:00:00.000Z', 'Kiet', {
+    milestone: [null, 'Sprint 7'],
+    assigned_to: ['Linh Tran', ''],
+    points: { Back: ['?', '5'] },
+  }),
+];
+
+export const WIKI_PAGES = [
+  {
+    slug: 'release-steps',
+    content: '# Release\n\n1. Freeze the branch.\n2. Run the payment checks.\n',
+    created_date: '2026-01-10T08:00:00.000Z',
+    modified_date: '2026-03-01T08:00:00.000Z',
+    editions: 4,
+    last_modifier: 8,
+  },
+  {
+    slug: 'home',
+    content: 'Welcome.',
+    created_date: '2026-01-05T08:00:00.000Z',
+    modified_date: '2026-01-05T08:00:00.000Z',
+    editions: 1,
+    last_modifier: 7,
+  },
+];
+
+const WIKI_LINKS = [{ title: 'How we release', href: 'release-steps' }];
 
 const EPIC_DETAIL = {
   ...EPICS[0],
@@ -230,6 +357,32 @@ export function acme(override: (call: Call) => Response | undefined = () => unde
         return paged(ISSUES, call);
       case '/epics':
         return paged(EPICS, call);
+      case '/tasks':
+        // The tasks of one story, when asked for them.
+        return paged(
+          TASKS.filter(
+            (task) =>
+              query['user_story'] === undefined ||
+              String(task.user_story_extra_info?.id) === query['user_story'],
+          ),
+          call,
+        );
+      case '/userstories/attachments':
+        return json(query['object_id'] === '1002' ? STORY_FILES : []);
+      case '/issues/attachments':
+      case '/epics/attachments':
+      case '/tasks/attachments':
+        return json([]);
+      case '/wiki':
+        return paged(WIKI_PAGES, call);
+      case '/wiki-links':
+        return json(WIKI_LINKS);
+      case '/wiki/by_slug': {
+        const page = WIKI_PAGES.find((candidate) => candidate.slug === query['slug']);
+        return page ? json(page) : notFound();
+      }
+      case '/search':
+        return json({ count: 1, wikipages: [{ id: 1, slug: 'release-steps' }], userstories: [], tasks: [] });
       case '/resolver': {
         const kinds: Record<string, object> = {
           '42': { us: 1002 },
@@ -245,12 +398,15 @@ export function acme(override: (call: Call) => Response | undefined = () => unde
         return json(ISSUE_DETAIL);
       case '/epics/3001':
         return json(EPIC_DETAIL);
+      case '/tasks/4001':
+        return json(TASK_DETAIL);
       case '/epics/custom-attributes-values/3001':
         return json({ attributes_values: { '61': '2026-01-05', '62': '2026-02-27', '63': '' }, version: 3 });
       case '/history/userstory/1002':
-        return paged(STORY_COMMENTS, call);
+        return paged(query['type'] === 'activity' ? STORY_CHANGES : STORY_COMMENTS, call);
       case '/history/issue/2001':
       case '/history/epic/3001':
+      case '/history/task/4001':
         return paged([], call);
       default:
         return notFound();

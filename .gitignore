@@ -1,0 +1,8 @@
+node_modules
+dist
+*.log
+.DS_Store
+# Credentials stay on this machine. Only .env.example is committed.
+.env
+.env.*
+!.env.example

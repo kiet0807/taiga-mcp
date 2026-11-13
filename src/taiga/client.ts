@@ -569,6 +569,7 @@ export class TaigaClient {
     const until = optional(filters.to, endOfDay);
 
     const matches: Activity[] = [];
+    let newest: string | undefined;
     let oldest: string | undefined;
     let complete = false;
     reading: for (let batch = 1; batch <= ACTIVITY_BATCHES; batch++) {
@@ -584,6 +585,7 @@ export class TaigaClient {
         throw error;
       }
       for (const event of events) {
+        newest ??= event.created;
         oldest = event.created;
         if (until !== undefined && event.created > until) continue;
         if (filters.from !== undefined && event.created < filters.from) {
@@ -609,6 +611,7 @@ export class TaigaClient {
       first: skip + 1,
       more: matches.length > skip + filters.limit,
       checkedBackTo: complete || matches.length > skip + filters.limit ? undefined : day(oldest),
+      logEndsOn: logEnd(newest, filters.from, this.#now()),
     };
   }
 
@@ -972,6 +975,17 @@ const searchWords = (search: string | undefined) => search?.trim() || undefined;
 
 /** The last moment of a day, so that "to 2026-03-31" includes what happened on the 31st. */
 const endOfDay = (date: string) => `${date}T23:59:59Z`;
+
+/** A week without a single event in a project people work in is worth pointing out. */
+const LOG_SILENT_DAYS = 7;
+
+/** The day the activity log ends, when the question reaches past it or the log has gone quiet. */
+function logEnd(newest: string | undefined, from: string | undefined, now: Date): string | undefined {
+  if (newest === undefined) return undefined;
+  const quiet = now.getTime() - Date.parse(newest) > LOG_SILENT_DAYS * 86_400_000;
+  const askedPast = from !== undefined && newest.slice(0, 10) < from;
+  return quiet || askedPast ? day(newest) : undefined;
+}
 
 const authorOf = (entry: RawHistoryEntry) => entry.user?.name || entry.user?.username || 'Unknown';
 

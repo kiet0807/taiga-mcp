@@ -145,8 +145,13 @@ describe('list_activity', () => {
   it('says so when nothing happened, and when the person is not one member', async () => {
     const { ask, refusal, calls } = await acmeServer();
 
+    // Asked about days after the newest event: the answer says where the log ends.
     expect(await ask('list_activity', { from: '2027-01-01' })).toBe(
-      'Activity in Acme Billing · from 2027-01-01: nothing found.',
+      [
+        'Activity in Acme Billing · from 2027-01-01: nothing found.',
+        '',
+        "Taiga's activity log of this project has nothing after 2026-03-10. If items changed after that day (get_item shows when each was last changed), the log has stopped being written on this Taiga, and this list cannot show recent work: read it per item with get_item and `changes`, or list items with `created_from` or `finished_from`.",
+      ].join('\n'),
     );
 
     const before = calls.length;
@@ -158,6 +163,56 @@ describe('list_activity', () => {
     );
     // Neither question reached the timeline.
     expect(calls.slice(before)).toEqual([]);
+  });
+});
+
+describe('a log that stopped being written', () => {
+  // Seen on a real Taiga: the timeline ended a month before, while stories kept changing.
+  const stopped = (request: Call) =>
+    request.path === '/timeline/project/10' || request.path === '/timeline/user/7'
+      ? paged(
+          [
+            {
+              created: '2026-02-05T08:00:00.000Z',
+              event_type: 'tasks.task.create',
+              data: {
+                user: { name: 'Kiet', username: 'kiet' },
+                project: { id: 10 },
+                comment: '',
+                values_diff: {},
+                task: { id: 4009, ref: 79, subject: 'Old task' },
+              },
+            },
+          ],
+          request,
+        )
+      : undefined;
+
+  it('says where the log ends instead of reporting a quiet week', async () => {
+    const { ask } = await acmeServer(stopped);
+
+    expect(await ask('list_activity', { from: '2026-03-03' })).toBe(
+      [
+        'Activity in Acme Billing · from 2026-03-03: nothing found.',
+        '',
+        "Taiga's activity log of this project has nothing after 2026-02-05. If items changed after that day (get_item shows when each was last changed), the log has stopped being written on this Taiga, and this list cannot show recent work: read it per item with get_item and `changes`, or list items with `created_from` or `finished_from`.",
+      ].join('\n'),
+    );
+  });
+
+  it('says it also when the answer has events, all of them old', async () => {
+    const { ask } = await acmeServer(stopped);
+
+    const answer = await ask('list_activity', { by_me: true });
+    expect(answer).toContain('- 2026-02-05 08:00 · Kiet · created task #79 Old task');
+    expect(answer).toContain("Taiga's activity log of the signed-in user has nothing after 2026-02-05.");
+  });
+
+  it('stays silent about a log that is up to date', async () => {
+    const { ask } = await acmeServer();
+
+    expect(await ask('list_activity')).not.toContain('activity log');
+    expect(await ask('list_activity', { from: '2026-03-06' })).not.toContain('activity log');
   });
 });
 

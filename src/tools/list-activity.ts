@@ -97,6 +97,11 @@ export function registerListActivity(server: McpServer, taiga: TaigaClient): voi
       const notes = [
         activity.more &&
           `More after these: call again with \`page\`: ${args.page + 1} and the same \`limit\` and filters.`,
+        activity.logEndsOn !== undefined &&
+          `Taiga's activity log ${activity.by === undefined ? 'of this project' : `of ${activity.by === 'me' ? 'the signed-in user' : activity.by}`} ` +
+            `has nothing after ${activity.logEndsOn}. If items changed after that day (get_item shows when each ` +
+            'was last changed), the log has stopped being written on this Taiga, and this list cannot show ' +
+            'recent work: read it per item with get_item and `changes`, or list items with `created_from` or `finished_from`.',
         activity.checkedBackTo !== undefined &&
           `Looked back to ${activity.checkedBackTo} only; older activity was not checked. To reach further back, ` +
             'give `from`, `to`, `by` or `kind`, or ask for the next `page`.',

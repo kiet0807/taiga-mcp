@@ -398,6 +398,12 @@ export interface ActivityListing {
    * oldest event it looked at. Older activity was not checked.
    */
   readonly checkedBackTo: string | undefined;
+  /**
+   * The day of the newest event in Taiga's activity log, when it matters: the period asked for
+   * starts after it, or the log has been silent for over a week. A log that stops while items
+   * keep changing has stopped being written (Taiga fills it in the background).
+   */
+  readonly logEndsOn: string | undefined;
 }
 
 export interface SprintDetail {

@@ -229,6 +229,8 @@ describe('one item', () => {
         ['Due', '2026-03-13'],
         ['Sprint', 'Sprint 7'],
         ['Epics', '#12 Card payments'],
+        ['Watchers', 'Linh Tran, a former member'],
+        ['Votes', '2'],
       ],
       customFields: [],
       comments: [
@@ -243,14 +245,18 @@ describe('one item', () => {
       // The file that was replaced by a newer one is left out.
       attachments: [
         {
+          number: 1,
           name: 'bank-reply.pdf',
           size: 86_016,
           url: 'https://taiga.example/files/bank-reply.pdf',
+          sha1: 'a1b2c3',
           note: 'What the bank answered',
         },
       ],
       changes: undefined,
       totalChanges: 0,
+      changesPage: 1,
+      changesPages: 1,
     });
     expect(queries('/tasks')).toEqual([{ project: '10', user_story: '1002' }]);
   });

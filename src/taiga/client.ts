@@ -1,7 +1,10 @@
 import type { TaigaConfig } from '../config.js';
-import { progress } from '../format.js';
+import { fold, progress } from '../format.js';
 import { TaigaError, TaigaHttp, type Query } from './http.js';
+import { readFile, type FileContent } from './files.js';
 import type {
+  Activity,
+  ActivityListing,
   Attachment,
   Change,
   Comment,
@@ -25,12 +28,15 @@ import type {
   RawResolved,
   RawSearch,
   RawSprint,
+  RawSprintStats,
   RawStory,
   RawTag,
   RawTask,
+  RawTimelineEvent,
   RawUser,
   RawWikiLink,
   RawWikiPage,
+  SprintDetail,
   SprintSummary,
   StorySummary,
   TaskSummary,
@@ -123,6 +129,13 @@ const MEMBERS_LISTED = 40;
 const PROJECT_CACHE_MS = 60_000;
 const COMMENTS_SHOWN = 5;
 const CHANGES_SHOWN = 20;
+/** Activity is read 100 events at a time, newest first, and at most this many times per question. */
+const ACTIVITY_BATCH = 100;
+const ACTIVITY_BATCHES = 10;
+/** The largest file read; a hosted server must also fit the answer in its response. */
+export const FILE_MAX_BYTES = 10 * 1024 * 1024;
+/** Images go to the model as they are, base64 in the answer, so they are held to less. */
+export const IMAGE_MAX_BYTES = 3 * 1024 * 1024;
 /** Fields of a history entry that say nothing a reader wants: positions on a board, and what the status already tells. */
 const SILENT_CHANGES = new Set([
   'is_closed',
@@ -135,10 +148,6 @@ const SILENT_CHANGES = new Set([
 const optional = <T, R>(value: T | undefined, use: (value: T) => R): R | undefined =>
   value === undefined ? undefined : use(value);
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-/** For names of people: case and accents do not matter, so "Kiet" finds "Kiệt". */
-const fold = (value: string) =>
-  value.trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replaceAll('đ', 'd');
-/** "an issue", "an epic", but "a user story". */
 const article = (label: string) => (/^[aei]/.test(label) ? `an ${label}` : `a ${label}`);
 const day = (timestamp: string | undefined) => timestamp?.slice(0, 10);
 
@@ -146,6 +155,61 @@ const day = (timestamp: string | undefined) => timestamp?.slice(0, 10);
 function localDay(date: Date): string {
   const two = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
+}
+
+/**
+ * Files already read, by the checksum of their content, so that reading a large file a part at a
+ * time downloads and parses it once. Keyed by content, the cache cannot hand anyone a file they
+ * could not read: only someone who can see a file with that checksum asks for it.
+ */
+class FileCache {
+  readonly #entries = new Map<string, { at: number; size: number; content: FileContent }>();
+  #size = 0;
+  constructor(
+    readonly ttlMs: number,
+    readonly maxBytes: number,
+  ) {}
+
+  get(key: string, now: number): FileContent | undefined {
+    const entry = this.#entries.get(key);
+    if (entry === undefined) return undefined;
+    if (now - entry.at > this.ttlMs) {
+      this.#drop(key);
+      return undefined;
+    }
+    return entry.content;
+  }
+
+  set(key: string, content: FileContent, size: number, now: number): void {
+    if (size > this.maxBytes) return;
+    this.#drop(key);
+    this.#entries.set(key, { at: now, size, content });
+    this.#size += size;
+    // A Map keeps insertion order: the first entries are the oldest.
+    for (const old of this.#entries.keys()) {
+      if (this.#size <= this.maxBytes) break;
+      this.#drop(old);
+    }
+  }
+
+  clear(): void {
+    this.#entries.clear();
+    this.#size = 0;
+  }
+
+  #drop(key: string): void {
+    const entry = this.#entries.get(key);
+    if (entry === undefined) return;
+    this.#size -= entry.size;
+    this.#entries.delete(key);
+  }
+}
+
+const fileCache = new FileCache(10 * 60_000, 64 * 1024 * 1024);
+
+/** For tests: forget every file read so far. */
+export function forgetFiles(): void {
+  fileCache.clear();
 }
 
 /**
@@ -322,6 +386,8 @@ export class TaigaClient {
       comments?: number | undefined;
       /** Also read who changed what: status, assignee, sprint… */
       changes?: boolean | undefined;
+      /** Which page of the history, 20 entries a page, newest first. */
+      changesPage?: number | undefined;
     } = {},
   ): Promise<ItemDetail> {
     const project = await this.#project(slug);
@@ -335,6 +401,7 @@ export class TaigaClient {
     const api = API[kind];
     const fields = project.customFields[kind];
     const commentsWanted = options.comments ?? COMMENTS_SHOWN;
+    const changesPage = options.changesPage ?? 1;
     const historyPath = `/history/${api.history}/${id}`;
 
     const [item, custom, history, activity, tasks, attachments] = await Promise.all([
@@ -347,8 +414,18 @@ export class TaigaClient {
       commentsWanted === 0
         ? undefined
         : this.#http.page<RawHistoryEntry>(historyPath, { type: 'comment' }, commentsWanted * 2),
-      options.changes
-        ? this.#http.page<RawHistoryEntry>(historyPath, { type: 'activity' }, CHANGES_SHOWN)
+      options.changes || options.changesPage !== undefined
+        ? this.#http
+            .page<RawHistoryEntry>(historyPath, { type: 'activity' }, CHANGES_SHOWN, changesPage)
+            .catch((error: unknown) => {
+              if (changesPage > 1 && error instanceof TaigaError && error.status === 404) {
+                throw new TaigaError(
+                  `The history of #${ref} has no page ${changesPage}. Call with \`changes_page\`: 1 to see how many pages there are.`,
+                  404,
+                );
+              }
+              throw error;
+            })
         : undefined,
       kind === 'story'
         ? this.#http.get<RawTask[]>(
@@ -397,7 +474,202 @@ export class TaigaClient {
       attachments,
       changes,
       totalChanges: Math.max(activity?.total ?? 0, changes?.length ?? 0),
+      changesPage,
+      changesPages: Math.max(1, Math.ceil((activity?.total ?? 0) / CHANGES_SHOWN)),
     };
+  }
+
+  /**
+   * The text or image of one file attached to an item. `file` is its number in the item's list
+   * of files, or its name (or a part of it that fits one file only).
+   */
+  async getAttachment(
+    slug: string,
+    ref: number,
+    file: string,
+  ): Promise<{ item: string; file: Attachment; content: FileContent }> {
+    const project = await this.#project(slug);
+    const { kind, id } = await this.#resolve(project, ref);
+    if (kind === undefined || id === undefined) {
+      throw new TaigaError(`Project "${project.name}" has no item #${ref}.`, 404);
+    }
+    const files = await this.#attachments(API[kind].list, project, id);
+    const label = `${API[kind].label} #${ref}`;
+    if (files.length === 0) throw new TaigaError(`${capital(label)} has no attached files.`, 404);
+
+    const wanted = file.trim();
+    const byNumber = /^#?\d+$/.test(wanted) ? files[Number(wanted.replace('#', '')) - 1] : undefined;
+    const exact = files.filter((f) => same(f.name, wanted));
+    const partial = files.filter((f) => f.name.toLowerCase().includes(wanted.toLowerCase()));
+    const found = byNumber ?? (exact.length === 1 ? exact[0] : partial.length === 1 ? partial[0] : undefined);
+    if (found === undefined) {
+      const list = files.map((f) => `${f.number}. ${f.name}`).join(', ');
+      throw new TaigaError(
+        partial.length > 1
+          ? `"${file}" fits several files of ${label}: ${list}. Pass the number.`
+          : `${capital(label)} has no file "${file}". Its files: ${list}.`,
+        404,
+      );
+    }
+    if (found.url === undefined) throw new TaigaError(`Taiga gave no address for "${found.name}".`);
+
+    const now = this.#now().getTime();
+    const cached = found.sha1 === undefined ? undefined : fileCache.get(found.sha1, now);
+    if (cached !== undefined)
+      return { item: `${capital(label)} of ${project.name}`, file: found, content: cached };
+
+    const { bytes, type } = await this.#http.download(found.url, FILE_MAX_BYTES);
+    let content = await readFile(found.name, bytes, type);
+    if (content.kind === 'image' && bytes.byteLength > IMAGE_MAX_BYTES) {
+      content = {
+        kind: 'unreadable',
+        reason: `The image is ${(bytes.byteLength / (1024 * 1024)).toFixed(1)} MB; images are passed on up to ${IMAGE_MAX_BYTES / (1024 * 1024)} MB. Open it in Taiga instead.`,
+      };
+    }
+    if (found.sha1 !== undefined) fileCache.set(found.sha1, content, bytes.byteLength, now);
+    return { item: `${capital(label)} of ${project.name}`, file: found, content };
+  }
+
+  /* ------------------------------- activity ------------------------------- */
+
+  /**
+   * What happened in a project, newest first: items created, changed, commented on, deleted.
+   * Taiga can only list activity from the newest event backwards, so filters are applied while
+   * reading, up to ACTIVITY_BATCHES batches; the answer says how far back it looked.
+   */
+  async listActivity(
+    slug: string,
+    filters: Paging & {
+      byMe?: boolean | undefined;
+      /** A member's name or username. */
+      by?: string | undefined;
+      /** Days as YYYY-MM-DD, both included, UTC. */
+      from?: string | undefined;
+      to?: string | undefined;
+      kind?: ActivityKind | undefined;
+      /** Only events with a comment. */
+      commentsOnly?: boolean | undefined;
+      /** Only events about this item. */
+      ref?: number | undefined;
+    },
+  ): Promise<ActivityListing> {
+    const project = await this.#project(slug);
+    if (filters.byMe && filters.by !== undefined) {
+      throw new TaigaError('Pass either `by_me` or `by`, not both.');
+    }
+    const who = filters.byMe
+      ? { id: (await this.currentUser()).id, label: 'me' }
+      : filters.by === undefined
+        ? undefined
+        : (({ id, name }) => ({ id, label: name }))(findMember(project, filters.by));
+    // A person's own activity is a much shorter list to go through than the whole project's.
+    const path = who === undefined ? `/timeline/project/${project.id}` : `/timeline/user/${who.id}`;
+    const page = filters.page ?? 1;
+    const skip = (page - 1) * filters.limit;
+    const until = optional(filters.to, endOfDay);
+
+    const matches: Activity[] = [];
+    let oldest: string | undefined;
+    let complete = false;
+    reading: for (let batch = 1; batch <= ACTIVITY_BATCHES; batch++) {
+      let events: RawTimelineEvent[];
+      try {
+        events = (await this.#http.page<RawTimelineEvent>(path, {}, ACTIVITY_BATCH, batch)).items;
+      } catch (error) {
+        // Past the last page: everything has been read.
+        if (batch > 1 && error instanceof TaigaError && error.status === 404) {
+          complete = true;
+          break;
+        }
+        throw error;
+      }
+      for (const event of events) {
+        oldest = event.created;
+        if (until !== undefined && event.created > until) continue;
+        if (filters.from !== undefined && event.created < filters.from) {
+          complete = true;
+          break reading;
+        }
+        if (event.data?.project?.id !== undefined && event.data.project.id !== project.id) continue;
+        const activity = describeEvent(event, filters);
+        if (activity === undefined) continue;
+        matches.push(activity);
+        // One more than asked for says whether there are more.
+        if (matches.length > skip + filters.limit) break reading;
+      }
+      if (events.length < ACTIVITY_BATCH) {
+        complete = true;
+        break;
+      }
+    }
+    return {
+      project: project.name,
+      by: who?.label,
+      items: matches.slice(skip, skip + filters.limit),
+      first: skip + 1,
+      more: matches.length > skip + filters.limit,
+      checkedBackTo: complete || matches.length > skip + filters.limit ? undefined : day(oldest),
+    };
+  }
+
+  /* -------------------------------- sprints -------------------------------- */
+
+  /** One sprint in full: progress by stories, tasks and points, and the burndown. */
+  async getSprint(slug: string, wanted: string): Promise<SprintDetail> {
+    const project = await this.#project(slug);
+    const sprint = await this.#findSprint(project, wanted);
+    const [detail, stats] = await Promise.all([
+      this.#http.get<RawSprint>(`/milestones/${sprint.id}`),
+      this.#http.get<RawSprintStats>(`/milestones/${sprint.id}/stats`),
+    ]);
+    const today = localDay(this.#now());
+    const summary = toSprint(detail, today);
+    const sum = (value: RawSprintStats['total_points']) =>
+      typeof value === 'number'
+        ? value
+        : Object.values(value ?? {}).reduce<number>((a, b) => a + (b ?? 0), 0);
+    const done = stats.completed_points;
+    const points = Math.max(sum(stats.total_points), summary.totalPoints);
+    return {
+      project: project.name,
+      name: summary.name,
+      start: summary.start,
+      finish: summary.finish,
+      closed: summary.closed,
+      current: summary.current,
+      stories: summary.stories,
+      storiesDone: summary.storiesDone,
+      tasks: stats.total_tasks ?? 0,
+      tasksDone: stats.completed_tasks ?? 0,
+      points,
+      pointsDone: Math.max(
+        typeof done === 'number' ? done : (done ?? []).reduce<number>((a, b) => a + (b ?? 0), 0),
+        summary.closedPoints,
+      ),
+      iocaineDoses: stats.iocaine_doses ?? 0,
+      burndown:
+        points === 0
+          ? []
+          : (stats.days ?? [])
+              .filter((d) => d.day <= today)
+              .map((d) => ({
+                day: d.day,
+                open: round(d.open_points ?? 0),
+                ideal: round(d.optimal_points ?? 0),
+              })),
+    };
+  }
+
+  /** A sprint by name, or the one running today. */
+  async #findSprint(project: Project, wanted: string): Promise<{ id: number; name: string }> {
+    const named = project.sprints.find((sprint) => same(sprint.name, wanted) || same(sprint.slug, wanted));
+    if (named !== undefined) return named;
+    if (!same(wanted, 'current')) {
+      throw new TaigaError(
+        `Project "${project.name}" has no sprint "${wanted}". Pass a sprint name from list_sprints, or "current".`,
+      );
+    }
+    return this.#currentSprint(project);
   }
 
   /** The files attached to an item. An item the user may read but whose files they may not is shown without them. */
@@ -414,11 +686,13 @@ export class TaigaClient {
       });
     return raw
       .filter((file) => !file.is_deprecated)
-      .map((file) => ({
+      .map((file, i) => ({
+        number: i + 1,
         name: file.name,
         size: file.size ?? undefined,
         url: file.url ?? undefined,
         note: file.description?.trim() || undefined,
+        sha1: file.sha1 || undefined,
       }));
   }
 
@@ -632,6 +906,12 @@ export class TaigaClient {
       );
     }
 
+    const running = await this.#currentSprint(project);
+    return { query: { milestone: running.id }, label: `current sprint "${running.name}"` };
+  }
+
+  /** The open sprint whose dates include today, or an error that lists the open ones. */
+  async #currentSprint(project: Project): Promise<RawSprint> {
     const open = await this.#http.get<RawSprint[]>(
       '/milestones',
       { project: project.id, closed: false },
@@ -649,7 +929,7 @@ export class TaigaClient {
             : 'It has no open sprint. Call list_sprints with closed: true to see past ones.'),
       );
     }
-    return { query: { milestone: running.id }, label: `current sprint "${running.name}"` };
+    return running;
   }
 }
 
@@ -698,6 +978,9 @@ const authorOf = (entry: RawHistoryEntry) => entry.user?.name || entry.user?.use
 /** A value of a history entry, short enough for one line. */
 function shown(value: unknown): string {
   if (value === null || value === undefined || value === '' || value === 'None') return 'none';
+  if (Array.isArray(value) && value.every((v) => typeof v !== 'object' || v === null)) {
+    return value.length === 0 ? 'none' : value.map(String).join(', ');
+  }
   const text = typeof value === 'string' ? value : JSON.stringify(value);
   const line = text.replace(/\s+/g, ' ').trim();
   return line.length > 80 ? `${line.slice(0, 80)}…` : line;
@@ -708,7 +991,8 @@ function describeChange(diff: Readonly<Record<string, unknown>>): string | undef
   const label = (key: string) => (key === 'milestone' ? 'sprint' : key.replaceAll('_', ' '));
   const parts: string[] = [];
   for (const [key, value] of Object.entries(diff)) {
-    if (SILENT_CHANGES.has(key) || key.endsWith('_order')) continue;
+    // Board positions say nothing, and an `_html` field repeats the change of the field it renders.
+    if (SILENT_CHANGES.has(key) || key.endsWith('_order') || key.endsWith('_html')) continue;
     if (key.endsWith('_diff')) {
       parts.push(`${label(key.slice(0, -'_diff'.length))} edited`);
     } else if (Array.isArray(value) && value.length === 2) {
@@ -727,6 +1011,95 @@ function describeChange(diff: Readonly<Record<string, unknown>>): string | undef
   }
   return parts.length === 0 ? undefined : parts.join('; ');
 }
+
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+const round = (n: number) => Math.round(n * 10) / 10;
+
+/** What `list_activity` can be narrowed to, and the Taiga models behind each. */
+export type ActivityKind = 'story' | 'task' | 'issue' | 'epic' | 'wiki' | 'sprint';
+const MODELS: Readonly<Record<string, { kind: ActivityKind; label: string }>> = {
+  userstory: { kind: 'story', label: 'story' },
+  task: { kind: 'task', label: 'task' },
+  issue: { kind: 'issue', label: 'issue' },
+  epic: { kind: 'epic', label: 'epic' },
+  relateduserstory: { kind: 'epic', label: 'story' },
+  wikipage: { kind: 'wiki', label: 'wiki page' },
+  milestone: { kind: 'sprint', label: 'sprint' },
+};
+
+/** The object a timeline event is about, as much of it as the event carries. */
+type Ref = {
+  readonly ref?: number | undefined;
+  readonly subject?: string | undefined;
+  readonly slug?: string | undefined;
+  readonly name?: string | undefined;
+};
+const isRef = (value: unknown): value is Ref => typeof value === 'object' && value !== null;
+
+/** "story #42 Retry failed card payments", "wiki page release-steps", "sprint "Sprint 7"". */
+function itemName(label: string, object: Ref | undefined): string {
+  if (object === undefined) return label;
+  if (object.ref !== undefined)
+    return `${label} #${object.ref}${object.subject ? ` ${oneLine(object.subject)}` : ''}`;
+  if (object.slug !== undefined && label === 'wiki page') return `${label} ${object.slug}`;
+  if (object.name !== undefined) return `${label} "${object.name}"`;
+  return label;
+}
+
+const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
+const COMMENT_IN_ACTIVITY = 300;
+
+/** One timeline event in words, or nothing when it does not match or only reorders a board. */
+function describeEvent(
+  event: RawTimelineEvent,
+  filters: { kind?: ActivityKind | undefined; commentsOnly?: boolean | undefined; ref?: number | undefined },
+): Activity | undefined {
+  const [, model = '', action = ''] = event.event_type.split('.');
+  const known = MODELS[model];
+  const data = event.data ?? {};
+  if (filters.kind !== undefined && known?.kind !== filters.kind) return undefined;
+  const comment = data.comment?.trim();
+  if (filters.commentsOnly && !comment) return undefined;
+
+  const own = isRef(data[model]) ? (data[model] as Ref) : undefined;
+  let subject: string;
+  let verb: string;
+  if (model === 'relateduserstory') {
+    const story = isRef(data['userstory']) ? (data['userstory'] as Ref) : undefined;
+    const epic = isRef(data['epic']) ? (data['epic'] as Ref) : undefined;
+    subject = `${itemName('story', { ref: story?.ref, subject: own?.subject ?? story?.subject })} ${action === 'delete' ? 'from' : 'to'} ${itemName('epic', epic === undefined ? undefined : { ref: epic.ref })}`;
+    verb = action === 'create' ? 'linked' : action === 'delete' ? 'unlinked' : 'changed the link of';
+  } else {
+    subject = itemName(known?.label ?? model, own);
+    verb =
+      action === 'create'
+        ? 'created'
+        : action === 'delete'
+          ? 'deleted'
+          : comment
+            ? 'commented on'
+            : 'changed';
+  }
+  const refs = [own?.ref, isRef(data['userstory']) ? (data['userstory'] as Ref).ref : undefined];
+  if (filters.ref !== undefined && !refs.includes(filters.ref)) return undefined;
+
+  const changes = describeChange(data.values_diff ?? {});
+  // Moving cards around a board is recorded too; it says nothing.
+  if (action === 'change' && !comment && changes === undefined) return undefined;
+  const parts = [
+    `${verb} ${subject}`,
+    changes,
+    comment && `"${truncateText(oneLine(comment), COMMENT_IN_ACTIVITY)}"`,
+  ];
+  return {
+    at: event.created.slice(0, 16).replace('T', ' '),
+    author: data.user?.name || data.user?.username || 'Unknown',
+    what: parts.filter(Boolean).join(' · '),
+  };
+}
+
+const truncateText = (text: string, max: number) =>
+  text.length <= max ? text : `${text.slice(0, max).trimEnd()}…`;
 
 function toTask(project: Project, task: RawTask): TaskSummary {
   return {
@@ -868,5 +1241,12 @@ function factsOf(
     const counts = item.user_stories_counts;
     facts.push(['Stories', counts ? progress(counts.progress, counts.total) : undefined]);
   }
+  const watchers = (item.watchers ?? []).map(
+    (id) => project.members.find((member) => member.id === id)?.name ?? 'a former member',
+  );
+  facts.push(
+    ['Watchers', watchers.join(', ') || undefined],
+    ['Votes', item.total_voters ? String(item.total_voters) : undefined],
+  );
   return facts.filter((fact): fact is readonly [string, string] => fact[1] !== undefined);
 }

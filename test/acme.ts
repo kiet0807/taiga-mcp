@@ -1,5 +1,6 @@
 import { TaigaClient } from '../src/taiga/client.js';
 import { BASE, fakeTaiga, json, paged, USER, type Call } from './fake-taiga.js';
+import { pdfWith, PNG } from './fake-files.js';
 
 /**
  * "Acme Billing": an invented project, shaped like what Taiga's API returns (with the many
@@ -245,6 +246,9 @@ const STORY_DETAIL = {
   tags: [['payments', '#c00'], 'backend'],
   epics: [{ id: 3001, ref: 12, subject: 'Card payments' }],
   due_date: '2026-03-13',
+  // Linh, and someone who has left the project since.
+  watchers: [8, 404],
+  total_voters: 2,
 };
 
 /** Newest first. The second file was replaced by a newer one and is marked as such in Taiga. */
@@ -255,6 +259,7 @@ const STORY_FILES = [
     url: 'https://taiga.example/files/bank-reply.pdf',
     description: 'What the bank answered',
     is_deprecated: false,
+    sha1: 'a1b2c3',
   },
   {
     name: 'old-flow.png',
@@ -262,6 +267,106 @@ const STORY_FILES = [
     url: 'https://taiga.example/files/old-flow.png',
     is_deprecated: true,
   },
+];
+
+/** The issue's screenshot: a PNG, and a second file that is too large to read. */
+const ISSUE_FILES = [
+  {
+    name: 'total.png',
+    size: PNG.byteLength,
+    url: `${BASE}/files/total.png`,
+    sha1: 'png1',
+    is_deprecated: false,
+  },
+  {
+    name: 'dump.log',
+    size: 50 * 1024 * 1024,
+    url: `${BASE}/files/dump.log`,
+    sha1: 'log1',
+    is_deprecated: false,
+  },
+];
+
+/** What the stored files hold, by path below the host. */
+export const FILES: Record<string, { body: Uint8Array; type: string; length?: number }> = {
+  '/files/bank-reply.pdf': {
+    body: pdfWith(['Dear Acme,', 'The sandbox key is ready.']),
+    type: 'application/pdf',
+  },
+  '/files/total.png': { body: PNG, type: 'image/png' },
+  '/files/dump.log': { body: new TextEncoder().encode('x'), type: 'text/plain', length: 50 * 1024 * 1024 },
+};
+
+/** Sprint 7 as Taiga's statistics give it: one task in three done, and a burndown. */
+const SPRINT_7_STATS = {
+  total_tasks: 3,
+  completed_tasks: 1,
+  total_points: { '1': 13 },
+  completed_points: [5],
+  iocaine_doses: 1,
+  days: ['02', '03', '04', '05', '06', '09', '10', '11', '12', '13'].map((d, i) => ({
+    day: `2026-03-${d}`,
+    name: i,
+    open_points: [13, 13, 13, 11, 11, 8, 8, 8, 8, 8][i],
+    optimal_points: Math.round((13 - (13 / 9) * i) * 1000) / 1000,
+  })),
+};
+
+const event = (
+  created: string,
+  event_type: string,
+  name: string,
+  data: Record<string, unknown>,
+  project = 10,
+) => ({
+  created,
+  event_type,
+  data: { user: { name, username: 'x' }, project: { id: project }, comment: '', values_diff: {}, ...data },
+});
+
+const story42 = { id: 1002, ref: 42, subject: 'Retry failed card payments' };
+
+/** The project's activity, newest first, as `/timeline` gives it. */
+export const TIMELINE = [
+  event('2026-03-10T09:00:00.000Z', 'tasks.task.change', 'Linh Tran', {
+    task: { id: 4001, ref: 70, subject: 'Ask the bank for a sandbox key', userstory: story42 },
+    values_diff: { status: ['New', 'In progress'], taskboard_order: [1, 2] },
+  }),
+  event('2026-03-09T10:00:00.000Z', 'userstories.userstory.change', 'Linh Tran', {
+    userstory: story42,
+    comment: 'Sandbox access is promised for Thursday.',
+  }),
+  // Only moved on the board: says nothing, so it is left out.
+  event('2026-03-08T12:00:00.000Z', 'userstories.userstory.change', 'Kiet', {
+    userstory: { id: 1001, ref: 41, subject: 'Export invoices as PDF' },
+    values_diff: { backlog_order: [1, 2] },
+  }),
+  event('2026-03-07T08:00:00.000Z', 'tasks.task.create', 'Kiet', {
+    task: { id: 4002, ref: 71, subject: 'Schedule the three retries', userstory: story42 },
+  }),
+  event('2026-03-06T08:00:00.000Z', 'epics.relateduserstory.create', 'Kiet', {
+    epic: { id: 3001, ref: 12, subject: 'Card payments' },
+    userstory: story42,
+    relateduserstory: { id: 1, subject: 'Retry failed card payments' },
+  }),
+  event('2026-03-05T08:00:00.000Z', 'wiki.wikipage.change', 'Linh Tran', {
+    wikipage: { id: 1, slug: 'release-steps' },
+    values_diff: { content_diff: ['a', 'b'], content_html: ['a', 'b'] },
+  }),
+  // Kiet in another project: not part of this one's activity.
+  event(
+    '2026-03-04T08:00:00.000Z',
+    'issues.issue.create',
+    'Kiet',
+    { issue: { id: 9, ref: 3, subject: 'Elsewhere' } },
+    77,
+  ),
+  event('2026-03-01T08:00:00.000Z', 'milestones.milestone.create', 'Kiet', {
+    milestone: { id: 102, name: 'Sprint 8' },
+  }),
+  event('2026-02-28T08:00:00.000Z', 'issues.issue.delete', 'Kiet', {
+    issue: { id: 2003, ref: 50, subject: 'Duplicate of #57' },
+  }),
 ];
 
 const change = (created_at: string, name: string, values_diff: Record<string, unknown>) => ({
@@ -370,6 +475,27 @@ export function acme(override: (call: Call) => Response | undefined = () => unde
       case '/userstories/attachments':
         return json(query['object_id'] === '1002' ? STORY_FILES : []);
       case '/issues/attachments':
+        return json(query['object_id'] === '2001' ? ISSUE_FILES : []);
+      case '/timeline/project/10':
+        return paged(TIMELINE, call);
+      case '/timeline/user/7':
+        return paged(
+          TIMELINE.filter((e) => e.data.user.name === 'Kiet'),
+          call,
+        );
+      case '/timeline/user/8':
+        return paged(
+          TIMELINE.filter((e) => e.data.user.name === 'Linh Tran'),
+          call,
+        );
+      case '/milestones/101':
+        return json(SPRINTS[1]);
+      case '/milestones/101/stats':
+        return json(SPRINT_7_STATS);
+      case '/milestones/102':
+        return json(SPRINTS[0]);
+      case '/milestones/102/stats':
+        return json({ total_tasks: 0, completed_tasks: 0, total_points: {}, completed_points: [], days: [] });
       case '/epics/attachments':
       case '/tasks/attachments':
         return json([]);
@@ -409,6 +535,18 @@ export function acme(override: (call: Call) => Response | undefined = () => unde
       case '/history/task/4001':
         return paged([], call);
       default:
+        {
+          const file = FILES[path];
+          if (file !== undefined) {
+            return new Response(file.body, {
+              headers: {
+                'Content-Type': file.type,
+                'Content-Length': String(file.length ?? file.body.byteLength),
+              },
+            });
+          }
+        }
+        // Anything else is not there.
         return notFound();
     }
   });

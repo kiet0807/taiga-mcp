@@ -22,6 +22,12 @@ export interface Page<T> {
 }
 
 const TIMEOUT_MS = 15_000;
+const DOWNLOAD_TIMEOUT_MS = 30_000;
+
+const megabytes = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+/** `size` is what was seen so far, so it may be less than the whole file. */
+const tooLarge = (size: number, max: number) =>
+  `The file is at least ${megabytes(size)}; this server reads files up to ${megabytes(max)}. Open it in Taiga instead.`;
 
 /**
  * The only place that talks to Taiga. It signs in on first use, keeps the tokens in memory,
@@ -73,6 +79,54 @@ export class TaigaHttp {
     const items = (await response.json()) as T[];
     const count = Number(response.headers.get('x-pagination-count') ?? Number.NaN);
     return { items, total: Number.isFinite(count) ? Math.max(count, items.length) : items.length };
+  }
+
+  /**
+   * A file Taiga stores, by the address Taiga gave for it. Those addresses carry their own
+   * signature, so no token is sent: the file server may be another host. Stops at `maxBytes`.
+   */
+  async download(url: string, maxBytes: number): Promise<{ bytes: Uint8Array; type: string | undefined }> {
+    let response: Response;
+    try {
+      response = await this.#fetch(new URL(url), { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new TaigaError(`Could not download the file (${reason}).`);
+    }
+    if (!response.ok) {
+      throw new TaigaError(
+        response.status === 403 || response.status === 401
+          ? 'Taiga refused the file. Its link may have expired: read the item again with get_item and retry.'
+          : `Taiga answered ${response.status} for the file.`,
+        response.status,
+      );
+    }
+    const declared = Number(response.headers.get('content-length') ?? Number.NaN);
+    if (declared > maxBytes) {
+      await response.body?.cancel();
+      throw new TaigaError(tooLarge(declared, maxBytes), 413);
+    }
+    // The declared length may be missing or wrong: count while reading.
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const reader = response.body?.getReader();
+    while (reader !== undefined) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        throw new TaigaError(tooLarge(size, maxBytes), 413);
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.byteLength;
+    }
+    return { bytes, type: response.headers.get('content-type') ?? undefined };
   }
 
   /* ------------------------------ requests ------------------------------ */

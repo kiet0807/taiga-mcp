@@ -117,6 +117,10 @@ export function fileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** For matching what people type: case and accents do not matter, so "kiet" finds "Kiệt". */
+export const fold = (value: string) =>
+  value.trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replaceAll('đ', 'd');
+
 /** Long text cut to `max` characters, saying how much was left out. */
 export function truncate(value: string, max: number): string {
   if (value.length <= max) return value;

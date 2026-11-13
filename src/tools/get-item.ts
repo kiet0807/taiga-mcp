@@ -39,6 +39,15 @@ export function registerGetItem(server: McpServer, taiga: TaigaClient): void {
             `How many of the latest comments to read (default ${COMMENTS_DEFAULT}, at most ${COMMENTS_MAX}). ` +
               'Raise it when the answer says there are more and the discussion matters; 0 for none.',
           ),
+        changes_page: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe(
+            'Which page of the changes, 20 history entries a page, newest first. Implies `changes`. ' +
+              'The answer says how many pages there are.',
+          ),
         changes: z
           .boolean()
           .optional()
@@ -51,7 +60,11 @@ export function registerGetItem(server: McpServer, taiga: TaigaClient): void {
     },
     answer(async (args) =>
       describe(
-        await taiga.getItem(args.project, args.ref, { comments: args.comments, changes: args.changes }),
+        await taiga.getItem(args.project, args.ref, {
+          comments: args.comments,
+          changes: args.changes,
+          changesPage: args.changes_page,
+        }),
       ),
     ),
   );
@@ -99,10 +112,15 @@ function describe(item: ItemDetail): string {
   }
   if (item.attachments.length > 0) {
     sections.push(
-      `Attachments (${item.attachments.length}):\n` +
+      `Attachments (${item.attachments.length}; read one with get_attachment and its number):\n` +
         item.attachments
           .map((file) =>
-            [`- ${file.name}`, file.size !== undefined && fileSize(file.size), file.note, file.url]
+            [
+              `${file.number}. ${file.name}`,
+              file.size !== undefined && fileSize(file.size),
+              file.note,
+              file.url,
+            ]
               .filter(Boolean)
               .join(' · '),
           )
@@ -128,11 +146,14 @@ function describe(item: ItemDetail): string {
       item.changes.length === 0
         ? 'Changes: none recorded.'
         : `Changes (${
-            item.changes.length < item.totalChanges
-              ? `latest ${item.changes.length} of ${item.totalChanges}`
+            item.changesPages > 1
+              ? `page ${item.changesPage} of ${item.changesPages}, ${item.totalChanges} history entries in all`
               : item.changes.length
           }, newest first):\n` +
-            item.changes.map((change) => `- ${change.date} ${change.author}: ${change.what}`).join('\n'),
+            item.changes.map((change) => `- ${change.date} ${change.author}: ${change.what}`).join('\n') +
+            (item.changesPage < item.changesPages
+              ? `\nOlder changes: call again with \`changes_page\`: ${item.changesPage + 1}.`
+              : ''),
     );
   }
   return sections.join('\n\n');

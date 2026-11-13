@@ -74,6 +74,35 @@ export interface RawSprint {
   }[];
 }
 
+/** `GET /milestones/{id}/stats`: progress, and the burndown day by day. */
+export interface RawSprintStats {
+  readonly total_tasks?: number | null;
+  readonly completed_tasks?: number | null;
+  /** Points per role, or one number. */
+  readonly total_points?: Readonly<Record<string, number | null>> | number | null;
+  readonly completed_points?: readonly (number | null)[] | number | null;
+  readonly iocaine_doses?: number | null;
+  readonly days?: readonly {
+    readonly day: string;
+    readonly open_points?: number | null;
+    readonly optimal_points?: number | null;
+  }[];
+}
+
+/** One event of a project's activity, from `/timeline`. */
+export interface RawTimelineEvent {
+  readonly created: string;
+  /** `<app>.<model>.<action>`, e.g. `userstories.userstory.change` or `tasks.task.create`. */
+  readonly event_type: string;
+  readonly data?: {
+    readonly user?: { readonly name?: string; readonly username?: string } | null;
+    readonly project?: { readonly id: number } | null;
+    readonly comment?: string | null;
+    readonly values_diff?: Readonly<Record<string, unknown>> | null;
+    readonly [model: string]: unknown;
+  } | null;
+}
+
 /** A tag arrives as a name, or as a `[name, colour]` pair. */
 export type RawTag = string | readonly [string, string | null];
 
@@ -91,6 +120,9 @@ interface RawItem {
   readonly modified_date?: string;
   readonly tags?: readonly RawTag[] | null;
   readonly due_date?: string | null;
+  /** Ids of the members who follow the item. */
+  readonly watchers?: readonly number[] | null;
+  readonly total_voters?: number | null;
   /** Only when a single item is read. */
   readonly description?: string;
 }
@@ -153,6 +185,8 @@ export interface RawAttachment {
   readonly url?: string | null;
   readonly description?: string | null;
   readonly is_deprecated?: boolean;
+  /** Checksum of the content: the same file has the same sha1 wherever it is attached. */
+  readonly sha1?: string | null;
 }
 
 export interface RawWikiPage {
@@ -288,11 +322,15 @@ export interface TaskSummary extends ItemSummary {
 }
 
 export interface Attachment {
+  /** Its place in the item's list, from 1: what get_attachment takes. */
+  readonly number: number;
   readonly name: string;
   /** Bytes. */
   readonly size: number | undefined;
   readonly url: string | undefined;
   readonly note: string | undefined;
+  /** Checksum of the content, for remembering a file already read. */
+  readonly sha1: string | undefined;
 }
 
 /** One entry of an item's history: who changed what, in words. */
@@ -331,7 +369,54 @@ export interface ItemDetail extends ItemSummary {
   readonly attachments: readonly Attachment[];
   /** Newest first. Only when the history was asked for. */
   readonly changes: readonly Change[] | undefined;
+  /** Entries in the whole history, including those that change nothing worth telling. */
   readonly totalChanges: number;
+  /** Which page of the history `changes` is, and how many pages there are. */
+  readonly changesPage: number;
+  readonly changesPages: number;
+}
+
+/** One event of a project's activity, in words. */
+export interface Activity {
+  /** YYYY-MM-DD HH:MM, UTC. */
+  readonly at: string;
+  readonly author: string;
+  readonly what: string;
+}
+
+export interface ActivityListing {
+  readonly project: string;
+  /** Whose activity, in words: a member's full name or "me". */
+  readonly by: string | undefined;
+  readonly items: readonly Activity[];
+  /** Position of the first item among all matches, from 1. */
+  readonly first: number;
+  /** More matches exist after these. */
+  readonly more: boolean;
+  /**
+   * When the search stopped before reaching the start of the activity or `from`: the day of the
+   * oldest event it looked at. Older activity was not checked.
+   */
+  readonly checkedBackTo: string | undefined;
+}
+
+export interface SprintDetail {
+  readonly project: string;
+  readonly name: string;
+  readonly start: string;
+  readonly finish: string;
+  readonly closed: boolean;
+  readonly current: boolean;
+  readonly stories: number;
+  readonly storiesDone: number;
+  readonly tasks: number;
+  readonly tasksDone: number;
+  readonly points: number;
+  readonly pointsDone: number;
+  /** Tasks the people doing them flagged as "iocaine": harder than planned, taking more than one person. */
+  readonly iocaineDoses: number;
+  /** Day by day, up to today: points still open, and where the ideal line is. */
+  readonly burndown: readonly { readonly day: string; readonly open: number; readonly ideal: number }[];
 }
 
 /** What a project is made of: the people, and the names its items use. */

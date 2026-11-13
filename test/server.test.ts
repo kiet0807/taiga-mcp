@@ -41,11 +41,14 @@ describe('the MCP server', () => {
       'list_projects',
       'get_project',
       'list_sprints',
+      'get_sprint',
       'list_user_stories',
       'list_tasks',
       'list_issues',
       'list_epics',
       'get_item',
+      'get_attachment',
+      'list_activity',
       'search',
       'list_wiki_pages',
       'get_wiki_page',
@@ -69,6 +72,7 @@ describe('the MCP server', () => {
         get_item: ['project', 'ref'],
         search: ['project', 'words'],
         get_wiki_page: ['project', 'page'],
+        get_attachment: ['project', 'ref', 'file'],
       };
       expect(tool.inputSchema.required ?? [], tool.name).toEqual(required[tool.name] ?? ['project']);
     }
@@ -395,6 +399,9 @@ describe('get_item', () => {
         'Due: 2026-03-13',
         'Sprint: Sprint 7',
         'Epics: #12 Card payments',
+        // One watcher has left the project since: Taiga still counts them, without a name.
+        'Watchers: Linh Tran, a former member',
+        'Votes: 2',
         'Blocked: Waiting for the bank sandbox',
         'Tags: payments, backend',
         'Created: 2026-03-01 by Linh Tran',
@@ -407,8 +414,8 @@ describe('get_item', () => {
         '- #70 Ask the bank for a sandbox key · In progress · Linh Tran',
         '- #71 Schedule the three retries · New · unassigned · BLOCKED',
         '',
-        'Attachments (1):',
-        '- bank-reply.pdf · 84 KB · What the bank answered · https://taiga.example/files/bank-reply.pdf',
+        'Attachments (1; read one with get_attachment and its number):',
+        '1. bank-reply.pdf · 84 KB · What the bank answered · https://taiga.example/files/bank-reply.pdf',
         '',
         'Comments (2, newest first):',
         '- 2026-03-09 Linh Tran: Sandbox access is promised for Thursday.',
@@ -422,7 +429,7 @@ describe('get_item', () => {
     expect(answer.split('\n\n').slice(-2)).toEqual([
       'Comments (latest 1 of 2, newest first):\n- 2026-03-09 Linh Tran: Sandbox access is promised for Thursday.',
       [
-        'Changes (latest 2 of 3, newest first):',
+        'Changes (2, newest first):',
         '- 2026-03-06 Linh Tran: is blocked: false → true; blocked note edited',
         '- 2026-03-02 Kiet: sprint: none → Sprint 7; assigned to: Linh Tran → none; points (Back): ? → 5',
       ].join('\n'),

@@ -7,23 +7,26 @@ It runs in two ways:
 - **On your machine** (stdio), for one person, with the Taiga account in a local `.env` file. See [Setup](#setup).
 - **Hosted** (HTTP), for a team, including people who never open a terminal: they paste one address into their AI assistant and sign in with their own Taiga account. See [Hosted server](#hosted-server).
 
-**Status:** eleven read-only tools, covered by tests against a fake Taiga and checked against a public project on Taiga cloud. A hosted instance runs at [taiga.kietnguyen.io.vn](https://taiga.kietnguyen.io.vn). Not published to npm.
+**Status:** fourteen read-only tools, covered by tests against a fake Taiga and checked against a public project on Taiga cloud. A hosted instance runs at [taiga.kietnguyen.io.vn](https://taiga.kietnguyen.io.vn). Not published to npm.
 
 ## Tools
 
-| Tool                | What it answers                                                                                                         |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `list_projects`     | The projects you are a member of, with their slugs                                                                      |
-| `get_project`       | One project: members and roles, statuses (and which count as closed), issue types, severities, priorities, tags, fields |
-| `list_sprints`      | Sprints with dates, stories done, points done, and which one runs today                                                 |
-| `list_user_stories` | Stories with status, assignee, points and sprint                                                                        |
-| `list_tasks`        | Tasks with status, assignee, and the story and sprint they belong to                                                    |
-| `list_issues`       | Issues with type, status, severity, priority and assignee                                                               |
-| `list_epics`        | Epics with status, assignee and how many of their stories are done                                                      |
-| `get_item`          | One story, task, issue or epic in full: dates, description, custom fields, files, comments, its tasks, its history      |
-| `search`            | Words across a whole project: stories, tasks, issues, epics and wiki pages at once                                      |
-| `list_wiki_pages`   | The wiki pages of a project                                                                                             |
-| `get_wiki_page`     | The text of one wiki page                                                                                               |
+| Tool                | What it answers                                                                                                                                      |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_projects`     | The projects you are a member of, with their slugs                                                                                                   |
+| `get_project`       | One project: members and roles, statuses (and which count as closed), issue types, severities, priorities, tags, fields                              |
+| `list_sprints`      | Sprints with dates, stories done, points done, and which one runs today                                                                              |
+| `get_sprint`        | One sprint: stories, tasks and points done, and the burndown day by day up to today                                                                  |
+| `list_user_stories` | Stories with status, assignee, points and sprint                                                                                                     |
+| `list_tasks`        | Tasks with status, assignee, and the story and sprint they belong to                                                                                 |
+| `list_issues`       | Issues with type, status, severity, priority and assignee                                                                                            |
+| `list_epics`        | Epics with status, assignee and how many of their stories are done                                                                                   |
+| `get_item`          | One story, task, issue or epic in full: dates, description, custom fields, files, watchers, votes, comments, its tasks, and its history page by page |
+| `get_attachment`    | What is in a file attached to an item: text, tables, pages or the picture itself, in parts when it is large                                          |
+| `list_activity`     | What happened in a project, newest first: who created, changed, commented on or deleted what, by person, day, kind or item                           |
+| `search`            | Words across a whole project: stories, tasks, issues, epics and wiki pages at once                                                                   |
+| `list_wiki_pages`   | The wiki pages of a project                                                                                                                          |
+| `get_wiki_page`     | The text of one wiki page                                                                                                                            |
 
 The four list tools for items share their filters:
 
@@ -46,9 +49,32 @@ How the tools are meant to be used by a model:
 - **Long lists come in pages.** An answer that does not hold everything says which part it is (`31 to 60 shown, page 2 of 5`) and how to ask for the next.
 - **`get_item` needs no type.** Taiga numbers stories, tasks, issues and epics of a project from one sequence, so the number says which kind it is.
 - **Short answers.** Long descriptions, comments and wiki pages are cut, with a note saying how much is missing.
+- **Activity is read backwards.** Taiga lists it from the newest event and cannot jump to a day, so `list_activity` reads back up to 1,000 events and, when it stops before the period asked for, says how far back it looked.
 - **Errors say what to do next**, for example: `"Linh" matches several members of project "Acme Billing": Linh Tran (linh.tran), Võ Thị Linh (vtlinh). Pass the full name or the username.`
 
 Every tool only reads. The server sends `GET` requests to Taiga, plus the sign-in itself.
+
+### Reading attached files
+
+`get_item` numbers the files attached to an item; `get_attachment` reads one, by that number or by its name.
+
+| Kind of file                              | What comes back                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------ |
+| PNG, JPEG, GIF, WebP (up to 3 MB)         | The picture itself, for the model to look at                                   |
+| PDF (first 300 pages)                     | The text, page by page                                                         |
+| Word `.docx`                              | The text, line by line                                                         |
+| Excel `.xlsx`, CSV, TSV                   | Sheets as rows, numbered as in the file; formulas show their last stored value |
+| PowerPoint `.pptx`                        | The text, slide by slide                                                       |
+| Text, code, JSON, Markdown, logs and such | The lines                                                                      |
+| `.doc`, `.xls`, `.ppt`, archives, video   | Not read: the answer says why and gives the link                               |
+
+A large file would use up the model's context, so no answer is longer than 20,000 characters (about 5,000 tokens):
+
+- A file that fits comes back whole.
+- A larger one comes back as an overview first: each sheet with its size and first 10 rows, or the first line of every page, or the first 60 lines.
+- From there the model asks for the part it needs: `sheet` and `rows` (`"120-300"`), `pages` (`"3-5"`), or `find` with words, which returns only the rows or lines that contain them. Every answer ends by saying how to get the next part.
+
+Files larger than 10 MB are not downloaded. A file is fetched from the signed address Taiga gives, without the Taiga token, and what was read is kept in memory for 10 minutes so that asking for another part does not download it again. The cache is keyed by the checksum Taiga reports for the file: whoever can name a checksum has been shown that very file by Taiga.
 
 ## Setup
 
@@ -91,7 +117,7 @@ Then ask, for example:
 
 ## Hosted server
 
-The same six tools over HTTP, for many people at once. Nobody installs anything: each person adds the server's address to an MCP app (in Claude: Settings → Connectors → Add custom connector), signs in with their own Taiga account on the page that opens, and from then on sees exactly what Taiga lets that account see.
+The same tools over HTTP, for many people at once. Nobody installs anything: each person adds the server's address to an MCP app (in Claude: Settings → Connectors → Add custom connector), signs in with their own Taiga account on the page that opens, and from then on sees exactly what Taiga lets that account see.
 
 A hosted server is set up in one of two ways:
 
@@ -159,6 +185,7 @@ pnpm test    # tests only; Taiga is faked, no network or account needed
 - `src/taiga/http.ts` is the only code that talks to Taiga: sign-in, token renewal, paging, error messages.
 - `src/taiga/client.ts` asks Taiga what the tools need: it turns slugs and names into ids, and trims the answers.
 - `src/tools/` holds one file per tool: its name, the description and arguments the model reads, and how the answer is worded.
+- `src/taiga/files.ts` turns an attached file into pages, sheets or lines; `src/tools/file-view.ts` decides which part of it fits in one answer.
 - `src/server.ts` registers the tools; `src/index.ts` connects the server to stdio.
 - `src/remote/` is the hosted server: `app.ts` (routes), `provider.ts` (the OAuth steps), `seal.ts` (encryption of what is handed out), `taiga-auth.ts` (sign-in and renewal at Taiga), `guard.ts` (what a typed Taiga address may be, and connections that stay on the public internet), `pages.ts` (the sign-in and front pages). `src/remote.ts` starts it; the root `app.js` is the same app, taken from `dist/`, for hosts that want an exported Express app.
 - `public/` holds the icons, the link-preview image and `robots.txt`; `design/og.html` is the source of the preview image.

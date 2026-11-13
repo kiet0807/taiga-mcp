@@ -14,7 +14,8 @@ export function registerListSprints(server: McpServer, taiga: TaigaClient): void
         'how many of its stories are done, points done out of the total when the team estimates, and which ' +
         'sprint is running today. Open sprints by default; some teams never close sprints, so an old sprint ' +
         'can still be open with unfinished stories. Use it for sprint dates and progress, or to find a sprint name; ' +
-        'for the stories or tasks inside a sprint call list_user_stories or list_tasks with `sprint`.',
+        'for the stories or tasks inside a sprint call list_user_stories or list_tasks with `sprint`; for the ' +
+        'tasks done and the burndown of one sprint, get_sprint.',
       inputSchema: {
         project,
         closed: z

@@ -85,33 +85,49 @@ const escape = (value: string) =>
     (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char,
   );
 
+/**
+ * The colours of the author's site (kietnguyen.io.vn): blue for what can be pressed, cyan for
+ * focus and links, a gradient on the heading, on deep navy in the dark and near-white in the light.
+ */
 const STYLE = `
-:root { color-scheme: light dark; --bg: #f4f5f7; --card: #fff; --text: #1c2330; --muted: #5b6577;
-  --line: #d9dde5; --accent: #2f6f4f; --accent-text: #fff; --error-bg: #fdecec; --error: #a12626; }
-@media (prefers-color-scheme: dark) { :root { --bg: #12151b; --card: #1b2029; --text: #e8ebf1;
-  --muted: #9aa4b5; --line: #2f3643; --accent: #4fa57a; --accent-text: #0d1512; --error-bg: #3a1d1f; --error: #f0a3a3; } }
+:root { color-scheme: light dark; --bg: #f8fafc; --card: #ffffff; --inset: #eef3f9; --text: #0b1f3a; --muted: #4b5a70;
+  --line: rgb(11 31 58 / 0.14); --field: rgb(11 31 58 / 0.4); --primary: #2563eb; --primary-hover: #1d4ed8;
+  --ring: #2563eb; --glow: rgb(37 99 235 / 0.11);
+  --grad: linear-gradient(100deg, #1d4ed8 0%, #0e7490 60%, #2563eb 100%);
+  --error-bg: #fdecec; --error: #a12626; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0a0f1a; --card: #0f1e36; --inset: #122543; --text: #e6edf5;
+  --muted: #a3b1c2; --line: rgb(192 199 209 / 0.16); --field: rgb(192 199 209 / 0.42); --ring: #22d3ee;
+  --glow: rgb(37 99 235 / 0.16);
+  --grad: linear-gradient(100deg, #60a5fa 0%, #22d3ee 55%, #a5f3fc 100%);
+  --error-bg: rgb(248 113 113 / 0.14); --error: #fca5a5; } }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
+body { margin: 0; min-height: 100vh; padding: 24px 16px; color: var(--text);
+  background: radial-gradient(48rem 26rem at 50% -8rem, var(--glow), transparent 70%) no-repeat var(--bg);
   font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 main { max-width: 440px; margin: 6vh auto 0; padding: 28px 24px; background: var(--card);
-  border: 1px solid var(--line); border-radius: 12px; }
-h1 { margin: 0 0 8px; font-size: 22px; line-height: 1.25; }
+  border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 24px 60px -32px var(--glow), 0 0 0 1px var(--glow); }
+h1 { margin: 0 0 8px; font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: -0.01em;
+  color: var(--primary); background: var(--grad); -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; }
 p { margin: 0 0 16px; color: var(--muted); }
 label { display: block; margin: 0 0 14px; font-size: 14px; font-weight: 600; }
 input { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; font: inherit; color: inherit;
-  background: transparent; border: 1px solid var(--line); border-radius: 8px; }
-input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  background: transparent; border: 1px solid var(--field); border-radius: 10px; }
+input:focus-visible, button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 button { width: 100%; margin: 6px 0 16px; padding: 11px 16px; font: inherit; font-weight: 600; cursor: pointer;
-  color: var(--accent-text); background: var(--accent); border: 0; border-radius: 8px; }
-.error { padding: 10px 12px; color: var(--error); background: var(--error-bg); border-radius: 8px; }
+  color: #ffffff; background: var(--primary); border: 0; border-radius: 10px; }
+button:hover { background: var(--primary-hover); }
+.error { padding: 10px 12px; color: var(--error); background: var(--error-bg); border-radius: 10px; }
 .note { margin: 0; font-size: 13px; }
-.returns { padding: 10px 12px; font-size: 14px; color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+.returns { padding: 10px 12px; font-size: 14px; color: var(--text); background: var(--inset);
+  border: 1px solid var(--line); border-radius: 10px; }
 small { display: block; margin-top: 6px; font-size: 13px; font-weight: 400; color: var(--muted); }
 ol { margin: 0 0 16px; padding-left: 22px; }
 li { margin-bottom: 10px; }
+li::marker { color: var(--ring); font-weight: 600; }
 code { display: block; margin-top: 6px; padding: 10px 12px; overflow-wrap: anywhere; user-select: all;
-  font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
-  border: 1px solid var(--line); border-radius: 8px; }
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--inset);
+  border: 1px solid var(--line); border-radius: 10px; }
 `;
 
 function page(lang: Lang, title: string, body: string): string {

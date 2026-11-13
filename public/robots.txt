@@ -1,0 +1,7 @@
+# The front page explains what this server is. Everything else is for apps, not for search.
+User-agent: *
+Allow: /$
+Allow: /?lang=
+Allow: /og.png
+Allow: /favicon.svg
+Disallow: /

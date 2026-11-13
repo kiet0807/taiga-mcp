@@ -333,6 +333,87 @@ describe('the hosted server', () => {
     expect(html).toContain(`<code>${base}/mcp</code>`);
   });
 
+  it('lets the front page be found, with a description and a preview image', async () => {
+    const { base } = await start();
+    const home = await fetch(base, { headers: { 'Accept-Language': 'en' } });
+    const html = await home.text();
+
+    expect(home.headers.get('vary')).toContain('Accept-Language');
+    expect(home.headers.get('content-security-policy')).toContain("img-src 'self'");
+    expect(html).toContain('<meta name="robots" content="index, follow">');
+    expect(html).toContain('<title>Taiga for AI assistants: ask Claude about your projects</title>');
+    expect(html).toMatch(/<meta name="description" content="Connect Claude or any MCP app to Taiga[^"]+">/);
+    expect(html).toContain(`<link rel="canonical" href="${base}/">`);
+    expect(html).toContain(`<link rel="alternate" hreflang="vi" href="${base}/?lang=vi">`);
+    expect(html).toContain(`<meta property="og:image" content="${base}/og.png">`);
+    expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
+    expect(html).toContain('<link rel="icon" href="/favicon.svg" type="image/svg+xml">');
+  });
+
+  it('answers in the language a link names, whatever the browser prefers', async () => {
+    const { base } = await start();
+    const home = await fetch(`${base}/?lang=vi`, { headers: { 'Accept-Language': 'en-US' } });
+    const html = await home.text();
+    expect(html).toContain('<html lang="vi">');
+    expect(html).toContain('Bạn có thể hỏi gì');
+    expect(html).toContain(`<link rel="canonical" href="${base}/?lang=vi">`);
+    expect(html).toContain('<meta property="og:locale" content="vi_VN">');
+
+    const unknown = await (await fetch(`${base}/?lang=fr`, { headers: { 'Accept-Language': 'en' } })).text();
+    expect(unknown).toContain('<html lang="en">');
+    expect(unknown).toContain(`<link rel="canonical" href="${base}/">`);
+  });
+
+  it('explains how to connect from other AI apps, with this server’s address filled in', async () => {
+    const { base } = await start();
+    const html = await (await fetch(base, { headers: { 'Accept-Language': 'en' } })).text();
+    for (const app of [
+      'Claude Code',
+      'ChatGPT',
+      'VS Code (GitHub Copilot)',
+      'Cursor',
+      'Gemini CLI',
+      'Codex CLI',
+      'Windsurf',
+    ]) {
+      expect(html, app).toContain(`<summary>${app}</summary>`);
+    }
+    expect(html).toContain(`claude mcp add --transport http taiga ${base}/mcp`);
+    // The configuration is JSON as the app reads it, with quotes escaped for HTML.
+    expect(html).toContain(`&quot;httpUrl&quot;: &quot;${base}/mcp&quot;`);
+    expect(html).not.toMatch(/<script/i);
+  });
+
+  it('keeps the sign-in page out of search and link previews', async () => {
+    const { base } = await start();
+    const { html } = await openLogin(base, await register(base));
+    expect(html).toContain('<meta name="robots" content="noindex">');
+    expect(html).not.toContain('og:image');
+    expect(html).not.toContain('rel="canonical"');
+  });
+
+  it('serves its icons, the preview image and robots.txt', async () => {
+    const { base } = await start();
+    const types: Record<string, RegExp> = {
+      '/favicon.svg': /^image\/svg\+xml/,
+      // Both names are in use for the same format.
+      '/favicon.ico': /^image\/(x-icon|vnd\.microsoft\.icon)/,
+      '/apple-touch-icon.png': /^image\/png/,
+      '/og.png': /^image\/png/,
+    };
+    for (const [path, type] of Object.entries(types)) {
+      const file = await fetch(`${base}${path}`);
+      expect(file.status, path).toBe(200);
+      expect(file.headers.get('content-type'), path).toMatch(type);
+    }
+    const robots = await (await fetch(`${base}/robots.txt`)).text();
+    expect(robots).toContain('Allow: /$');
+    expect(robots).toContain('Disallow: /');
+    // A folder is not a page, and nothing outside `public` is served.
+    expect((await fetch(`${base}/public/favicon.svg`)).status).toBe(404);
+    expect((await fetch(`${base}/..%2Fpackage.json`)).status).toBe(404);
+  });
+
   it('refuses a sign-in form whose hidden field was changed or left open too long', async () => {
     const { base, clock, calls } = await start();
     const { request } = await openLogin(base, await register(base));

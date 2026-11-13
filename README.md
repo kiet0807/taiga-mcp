@@ -1,33 +1,52 @@
 # taiga-mcp
 
-A read-only [Model Context Protocol](https://modelcontextprotocol.io) server for [Taiga](https://taiga.io). It lets an AI assistant such as Claude Code answer questions about your Taiga projects without you opening Taiga.
+A read-only [Model Context Protocol](https://modelcontextprotocol.io) server for [Taiga](https://taiga.io). It lets an AI assistant such as Claude, ChatGPT, Copilot or Cursor answer questions about your Taiga projects without you opening Taiga: sprints, user stories, tasks, issues, epics and the wiki.
 
 It runs in two ways:
 
 - **On your machine** (stdio), for one person, with the Taiga account in a local `.env` file. See [Setup](#setup).
 - **Hosted** (HTTP), for a team, including people who never open a terminal: they paste one address into their AI assistant and sign in with their own Taiga account. See [Hosted server](#hosted-server).
 
-**Status: all six tools of the first version work** and are covered by tests against a fake Taiga. Not yet published to npm, and no hosted instance is public yet.
+**Status:** eleven read-only tools, covered by tests against a fake Taiga and checked against a public project on Taiga cloud. A hosted instance runs at [taiga.kietnguyen.io.vn](https://taiga.kietnguyen.io.vn). Not published to npm.
 
 ## Tools
 
-| Tool                | Arguments                                                                              | What it returns                                                             |
-| ------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `list_projects`     | none                                                                                   | Projects you are a member of, with name and slug                            |
-| `list_sprints`      | `project`, `closed?`, `limit?`                                                         | Sprints with dates, stories done, points done, and which one runs today     |
-| `list_user_stories` | `project`, `sprint?`, `status?`, `closed?`, `assigned_to_me?`, `limit?`                | Stories with status, assignee, points and sprint                            |
-| `list_issues`       | `project`, `status?`, `closed?`, `severity?`, `priority?`, `assigned_to_me?`, `limit?` | Issues with type, status, severity, priority and assignee                   |
-| `list_epics`        | `project`, `closed?`, `limit?`                                                         | Epics with status and how many of their stories are done                    |
-| `get_item`          | `project`, `ref`                                                                       | One story, issue or epic in full: description, custom fields, last comments |
+| Tool                | What it answers                                                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `list_projects`     | The projects you are a member of, with their slugs                                                                      |
+| `get_project`       | One project: members and roles, statuses (and which count as closed), issue types, severities, priorities, tags, fields |
+| `list_sprints`      | Sprints with dates, stories done, points done, and which one runs today                                                 |
+| `list_user_stories` | Stories with status, assignee, points and sprint                                                                        |
+| `list_tasks`        | Tasks with status, assignee, and the story and sprint they belong to                                                    |
+| `list_issues`       | Issues with type, status, severity, priority and assignee                                                               |
+| `list_epics`        | Epics with status, assignee and how many of their stories are done                                                      |
+| `get_item`          | One story, task, issue or epic in full: dates, description, custom fields, files, comments, its tasks, its history      |
+| `search`            | Words across a whole project: stories, tasks, issues, epics and wiki pages at once                                      |
+| `list_wiki_pages`   | The wiki pages of a project                                                                                             |
+| `get_wiki_page`     | The text of one wiki page                                                                                               |
+
+The four list tools for items share their filters:
+
+| Filter                          | Meaning                                                                                    |
+| ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `status`, `closed`              | A status by name, or open/closed in general (by whether the status counts as closed)       |
+| `assigned_to_me`, `assigned_to` | The signed-in user, or anyone by name (part of a name, no accents needed), or `unassigned` |
+| `search`                        | Words in the title, description and tags                                                   |
+| `tag`                           | One tag                                                                                    |
+| `created_from`, `created_to`    | Days the item was created in, `YYYY-MM-DD`                                                 |
+| `finished_from`, `finished_to`  | Days the item was closed in (stories, tasks, issues; Taiga keeps no such date for epics)   |
+| `limit`, `page`                 | 30 items a page by default, at most 100; `page` reads the rest of a long list              |
+
+Plus `sprint` (a name, `current` or `backlog`) and `epic` on stories, `story` and `sprint` on tasks, `type`, `severity` and `priority` on issues.
 
 How the tools are meant to be used by a model:
 
-- **Names in, names out.** `project` is the slug from `list_projects`; statuses, severities, priorities and sprints are given by name (case does not matter); items are addressed by the `#123` reference number. Internal ids never appear.
-- **`sprint`** takes a sprint name, `current` (the open sprint whose dates include today) or `backlog` (stories in no sprint).
-- **`closed`** filters by whether the status counts as closed in the project, so "what is left" does not depend on status names.
-- **`get_item` needs no type.** Taiga numbers stories, issues and epics of a project from one sequence, so the number says which kind it is.
-- **Short answers.** Lists return 30 items unless `limit` says otherwise (at most 100), and say how many more exist. Long descriptions and comments are cut, with a note.
-- **Errors say what to do next**, for example: `Project "Acme Billing" has no user story status "Doing". It has: New, In progress, Done.`
+- **Names in, names out.** `project` is the slug from `list_projects`; statuses, severities, sprints, tags and people are given by name (case does not matter); items are addressed by the `#123` reference number. Internal ids never appear.
+- **Counting needs no paging.** Every list starts with the number of all matches (`Acme Billing · assigned to me · finished 2026-10-01 to 2026-10-31: 14 tasks`), so "how many" is one call with a small `limit`.
+- **Long lists come in pages.** An answer that does not hold everything says which part it is (`31 to 60 shown, page 2 of 5`) and how to ask for the next.
+- **`get_item` needs no type.** Taiga numbers stories, tasks, issues and epics of a project from one sequence, so the number says which kind it is.
+- **Short answers.** Long descriptions, comments and wiki pages are cut, with a note saying how much is missing.
+- **Errors say what to do next**, for example: `"Linh" matches several members of project "Acme Billing": Linh Tran (linh.tran), Võ Thị Linh (vtlinh). Pass the full name or the username.`
 
 Every tool only reads. The server sends `GET` requests to Taiga, plus the sign-in itself.
 
@@ -96,13 +115,28 @@ pnpm start:http
 | `PORT`        | Port to listen on (default 3000)                                                                        |
 | `TRUST_PROXY` | How many proxies sit in front of the server (default 1 when hosted, 0 on `localhost`)                   |
 
-People connect their app to `PUBLIC_URL` + `/mcp`. Opening `PUBLIC_URL` itself in a browser shows the steps, in English or Vietnamese. To try it on your machine: put `PUBLIC_URL=http://localhost:3000` and `MCP_SECRET` in `.env` and run `pnpm dev:http`.
+People connect their app to `PUBLIC_URL` + `/mcp`. Opening `PUBLIC_URL` itself in a browser shows the steps, in English or Vietnamese, for Claude and for other apps. To try it on your machine: put `PUBLIC_URL=http://localhost:3000` and `MCP_SECRET` in `.env` and run `pnpm dev:http`.
+
+### Connecting an app
+
+| App                      | How                                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Claude (web, desktop)    | Settings → Connectors → Add custom connector, paste the address                                                |
+| Claude Code              | `claude mcp add --transport http taiga <address>`, then `/mcp` to sign in                                      |
+| ChatGPT                  | Settings → Apps & Connectors → Advanced settings → Developer mode, then Create with the address and OAuth      |
+| VS Code (GitHub Copilot) | `.vscode/mcp.json`: `{ "servers": { "taiga": { "type": "http", "url": "<address>" } } }`                       |
+| Cursor                   | `~/.cursor/mcp.json`: `{ "mcpServers": { "taiga": { "url": "<address>" } } }`                                  |
+| Gemini CLI               | `~/.gemini/settings.json`: `{ "mcpServers": { "taiga": { "httpUrl": "<address>" } } }`, then `/mcp auth taiga` |
+| Codex CLI                | `codex mcp add taiga --url <address>`, then `codex mcp login taiga`                                            |
+| Windsurf                 | `~/.codeium/windsurf/mcp_config.json`: `{ "mcpServers": { "taiga": { "serverUrl": "<address>" } } }`           |
+
+Each app finds the sign-in by itself (OAuth discovery); there is no key to paste. These steps follow each app's documentation; so far the hosted server has been tried with the MCP SDK's own client only.
 
 ### Where to run it
 
 Any host that runs a Node.js process works: `pnpm build`, then `pnpm start:http` with the variables above.
 
-On Vercel no command is needed: the root `app.js` exports the Express app from the compiled `dist/`, which Vercel runs as one function after its own `pnpm build`. Import the repository, set `PUBLIC_URL`, `MCP_SECRET` and `ANY_TAIGA` (or `TAIGA_URL`) as environment variables, and add the domain. The server keeps nothing between requests, so it does not mind being started and stopped; the sign-in limit and the single use of a code (below) are then per running instance.
+On Vercel no command is needed: the root `app.js` exports the Express app from the compiled `dist/`, which Vercel runs as one function after its own `pnpm build`. Vercel serves `public/` (icons, the link-preview image, `robots.txt`) itself; elsewhere the app does. Import the repository, set `PUBLIC_URL`, `MCP_SECRET` and `ANY_TAIGA` (or `TAIGA_URL`) as environment variables, and add the domain. The server keeps nothing between requests, so it does not mind being started and stopped; the sign-in limit and the single use of a code (below) are then per running instance.
 
 ### How signing in works
 
@@ -127,7 +161,9 @@ pnpm test    # tests only; Taiga is faked, no network or account needed
 - `src/tools/` holds one file per tool: its name, the description and arguments the model reads, and how the answer is worded.
 - `src/server.ts` registers the tools; `src/index.ts` connects the server to stdio.
 - `src/remote/` is the hosted server: `app.ts` (routes), `provider.ts` (the OAuth steps), `seal.ts` (encryption of what is handed out), `taiga-auth.ts` (sign-in and renewal at Taiga), `guard.ts` (what a typed Taiga address may be, and connections that stay on the public internet), `pages.ts` (the sign-in and front pages). `src/remote.ts` starts it; the root `app.js` is the same app, taken from `dist/`, for hosts that want an exported Express app.
+- `public/` holds the icons, the link-preview image and `robots.txt`; `design/og.html` is the source of the preview image.
 - `test/acme.ts` is the invented project the tests run against.
+- CI (`.github/workflows/ci.yml`) runs `pnpm check` on every push and pull request.
 
 The stdio server speaks MCP on stdout, so nothing else may be printed there. Diagnostics go to stderr.
 

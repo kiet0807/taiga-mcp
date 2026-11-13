@@ -6,6 +6,7 @@ import {
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
 import { rateLimit } from 'express-rate-limit';
+import { fileURLToPath } from 'node:url';
 import { createServer } from '../server.js';
 import { TaigaClient } from '../taiga/client.js';
 import { TaigaError } from '../taiga/http.js';
@@ -34,8 +35,22 @@ export interface AppOptions {
 const EXPIRED_HINT =
   'The Taiga sign-in behind this connection has expired. Disconnect the Taiga connector and connect it again to sign in.';
 
-/** Vietnamese for a browser that prefers it over English; English for everyone else. */
+/** The icons, the preview image and robots.txt. From src/remote and from dist/remote it is two folders up. */
+const PUBLIC_DIR = fileURLToPath(new URL('../../public', import.meta.url));
+
+/** The language a link asked for with `?lang=`, if it is one the pages are written in. */
+function chosenLang(req: Request): Lang | undefined {
+  const { lang } = req.query;
+  return lang === 'vi' || lang === 'en' ? lang : undefined;
+}
+
+/**
+ * The language of a link that names one; otherwise Vietnamese for a browser that prefers it
+ * over English, and English for everyone else.
+ */
 function langOf(req: Request): Lang {
+  const chosen = chosenLang(req);
+  if (chosen !== undefined) return chosen;
   for (const tag of req.acceptsLanguages()) {
     const language = tag.toLowerCase().split('-')[0];
     if (language === 'vi' || language === 'en') return language;
@@ -43,14 +58,19 @@ function langOf(req: Request): Lang {
   return 'en';
 }
 
-/** Pages with a password field: never cached, never framed, nothing loaded from elsewhere. */
+/**
+ * Pages with a password field: never cached, never framed, nothing loaded from elsewhere
+ * (the only thing loaded at all is this server's own icon).
+ */
 function sendPage(res: Response, status: number, html: string): void {
   res
     .status(status)
     .set({
       'Cache-Control': 'no-store',
       'Content-Security-Policy':
-        "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+        "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+      // The same address answers in English or Vietnamese.
+      Vary: 'Accept-Language',
       'Referrer-Policy': 'no-referrer',
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
@@ -60,7 +80,7 @@ function sendPage(res: Response, status: number, html: string): void {
 }
 
 /**
- * The hosted server: the same six tools over HTTP, for many people at once.
+ * The hosted server: the same tools over HTTP, for many people at once.
  *
  * Each person signs in with their own Taiga account through the OAuth pages, and every request
  * to `/mcp` is answered with that person's Taiga token, so they see what Taiga lets them see.
@@ -227,8 +247,11 @@ export function createApp(options: AppOptions): Express {
   /* -------------------------------- the rest -------------------------------- */
 
   app.get('/', (req: Request, res: Response) => {
-    sendPage(res, 200, homePage(langOf(req), fixedHost, mcpUrl.href));
+    sendPage(res, 200, homePage(langOf(req), fixedHost, options.publicUrl, chosenLang(req)));
   });
+
+  // Hosts that serve `public/` themselves (Vercel) answer these before the app is asked.
+  app.use(express.static(PUBLIC_DIR, { index: false, maxAge: '1d' }));
 
   app.get('/healthz', (_req: Request, res: Response) => {
     res.json({ ok: true });

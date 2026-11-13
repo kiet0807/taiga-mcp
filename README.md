@@ -2,6 +2,8 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Taiga](https://taiga.io). It lets an AI assistant such as Claude, ChatGPT, Copilot or Cursor answer questions about your Taiga projects without you opening Taiga: sprints, user stories, tasks, issues, epics and the wiki. It reads by default; if you switch it on, it can also create items, change them and comment. It can never delete anything.
 
+How it works inside, flow by flow, with links into the code: [docs/how-it-works.md](docs/how-it-works.md).
+
 It runs in two ways:
 
 - **On your machine** (stdio), for one person, with the Taiga account in a local `.env` file. See [Setup](#setup).

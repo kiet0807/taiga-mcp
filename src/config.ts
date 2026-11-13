@@ -7,6 +7,11 @@ export interface TaigaConfig {
   /** Tokens obtained elsewhere, used as they are. Without credentials, an expired pair ends the session. */
   readonly token?: string;
   readonly refreshToken?: string;
+  /**
+   * What to tell the person when the token has expired and cannot be renewed. The default
+   * names the environment variables, which means nothing to someone using the hosted server.
+   */
+  readonly expiredHint?: string;
 }
 
 /** A problem with the environment variables. The message says what to set; it never echoes a secret. */
@@ -14,15 +19,15 @@ export class ConfigError extends Error {
   override readonly name = 'ConfigError';
 }
 
-type Env = Readonly<Record<string, string | undefined>>;
+export type Env = Readonly<Record<string, string | undefined>>;
 
 /** An unset variable and an empty one (`TAIGA_TOKEN=` in a .env file) mean the same thing. */
-function read(env: Env, key: string): string | undefined {
+export function read(env: Env, key: string): string | undefined {
   const value = env[key]?.trim();
   return value ? value : undefined;
 }
 
-function normalizeBaseUrl(raw: string): string {
+export function normalizeBaseUrl(raw: string): string {
   let url: URL;
   try {
     url = new URL(raw);

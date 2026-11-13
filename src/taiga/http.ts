@@ -154,7 +154,8 @@ export class TaigaHttp {
     const { credentials } = this.#config;
     if (credentials === undefined) {
       throw new TaigaError(
-        'The Taiga token has expired and cannot be renewed. Set a new TAIGA_TOKEN, or set TAIGA_USERNAME and TAIGA_PASSWORD so the server can sign in by itself.',
+        this.#config.expiredHint ??
+          'The Taiga token has expired and cannot be renewed. Set a new TAIGA_TOKEN, or set TAIGA_USERNAME and TAIGA_PASSWORD so the server can sign in by itself.',
         401,
       );
     }

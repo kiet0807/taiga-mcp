@@ -137,6 +137,7 @@ describe('sprints', () => {
         totalPoints: 0,
         closedPoints: 0,
         stories: 0,
+        storiesDone: 0,
       },
       {
         name: 'Sprint 7',
@@ -147,6 +148,7 @@ describe('sprints', () => {
         totalPoints: 13,
         closedPoints: 5,
         stories: 3,
+        storiesDone: 1,
       },
     ]);
   });
@@ -241,7 +243,7 @@ describe('one item', () => {
     const epic = await client.getItem(SLUG, 12);
     expect(epic).toMatchObject({
       kind: 'epic',
-      facts: [['Stories', '2.5 of 8 done (31%)']],
+      facts: [['Stories', '8 stories, 31% done']],
       customFields: [
         ['Start date', '2026-01-05'],
         ['End date', '2026-02-27'],

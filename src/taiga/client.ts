@@ -378,6 +378,9 @@ function toSprint(sprint: RawSprint, today: string): SprintSummary {
     totalPoints: sprint.total_points ?? 0,
     closedPoints: sprint.closed_points ?? 0,
     stories: sprint.user_stories?.length ?? 0,
+    // By status, like the `closed` filter of the list tools. A story's own `is_closed` flag also
+    // turns on when all its tasks are closed, which would disagree with the status shown.
+    storiesDone: sprint.user_stories?.filter((story) => story.status_extra_info?.is_closed).length ?? 0,
   };
 }
 

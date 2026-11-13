@@ -78,10 +78,13 @@ export function closedScope(closed: boolean | undefined): string | undefined {
   return closed === undefined ? undefined : closed ? 'closed only' : 'open only';
 }
 
-/** "12 of 35 done (34%)". Taiga counts a half-finished story as a fraction, so the count is rounded. */
+/**
+ * "35 stories, 34% done". Taiga counts a half-finished story as a fraction, so a count of done
+ * stories ("5.5 of 21") reads oddly; a percentage of the whole does not.
+ */
 export function progress(done: number, total: number): string {
   if (total === 0) return 'no stories';
-  return `${Math.round(done * 10) / 10} of ${total} done (${Math.round((done / total) * 100)}%)`;
+  return `${total} ${total === 1 ? 'story' : 'stories'}, ${Math.round((done / total) * 100)}% done`;
 }
 
 /** Long text cut to `max` characters, saying how much was left out. */

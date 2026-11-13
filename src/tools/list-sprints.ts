@@ -11,8 +11,9 @@ export function registerListSprints(server: McpServer, taiga: TaigaClient): void
       title: 'List sprints',
       description:
         'List the sprints of a Taiga project (Taiga also calls them milestones), newest first: name, dates, ' +
-        'number of stories, points done out of the total, and which sprint is running today. ' +
-        'Open sprints by default. Use it for sprint dates and progress, or to find a sprint name; ' +
+        'how many of its stories are done, points done out of the total when the team estimates, and which ' +
+        'sprint is running today. Open sprints by default; some teams never close sprints, so an old sprint ' +
+        'can still be open with unfinished stories. Use it for sprint dates and progress, or to find a sprint name; ' +
         'for the stories inside a sprint call list_user_stories with `sprint`.',
       inputSchema: {
         project,
@@ -35,8 +36,11 @@ export function registerListSprints(server: McpServer, taiga: TaigaClient): void
             `- ${sprint.name}`,
             `${sprint.start} to ${sprint.finish}`,
             sprint.current && 'running today',
-            `${sprint.stories} ${sprint.stories === 1 ? 'story' : 'stories'}`,
-            `${sprint.closedPoints} of ${sprint.totalPoints} points done`,
+            sprint.stories === 0
+              ? 'no stories'
+              : `${sprint.storiesDone} of ${sprint.stories} ${sprint.stories === 1 ? 'story' : 'stories'} done`,
+            // Teams that do not estimate have 0 points everywhere; "0 of 0 points" only adds noise.
+            sprint.totalPoints > 0 && `${sprint.closedPoints} of ${sprint.totalPoints} points done`,
           ]
             .filter(Boolean)
             .join(' · '),

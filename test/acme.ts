@@ -77,7 +77,11 @@ export const SPRINTS = [
     closed: false,
     total_points: 13,
     closed_points: 5,
-    user_stories: [{}, {}, {}],
+    user_stories: [
+      { status_extra_info: { is_closed: true } },
+      { is_closed: true, status_extra_info: { is_closed: false } },
+      { status_extra_info: { is_closed: false } },
+    ],
   },
   {
     id: 100,
@@ -87,7 +91,7 @@ export const SPRINTS = [
     closed: true,
     total_points: 21,
     closed_points: 21,
-    user_stories: [{}],
+    user_stories: [{ status_extra_info: { is_closed: true } }],
   },
 ];
 

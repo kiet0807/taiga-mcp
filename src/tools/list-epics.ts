@@ -28,7 +28,7 @@ export function registerListEpics(server: McpServer, taiga: TaigaClient): void {
             epic.subject,
             status(epic),
             assignee(epic.assignee),
-            `stories: ${progress(epic.storiesDone, epic.stories)}`,
+            progress(epic.storiesDone, epic.stories),
             epic.blocked && 'BLOCKED',
           ),
         ),

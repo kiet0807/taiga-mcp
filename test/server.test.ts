@@ -116,8 +116,9 @@ describe('list_sprints', () => {
     expect(await ask('list_sprints')).toBe(
       [
         'Acme Billing · open sprints: 2 sprints.',
-        '- Sprint 8 · 2026-03-16 to 2026-03-27 · 0 stories · 0 of 0 points done',
-        '- Sprint 7 · 2026-03-02 to 2026-03-13 · running today · 3 stories · 5 of 13 points done',
+        // Sprint 8 has no points, so the points part is left out.
+        '- Sprint 8 · 2026-03-16 to 2026-03-27 · no stories',
+        '- Sprint 7 · 2026-03-02 to 2026-03-13 · running today · 1 of 3 stories done · 5 of 13 points done',
       ].join('\n'),
     );
   });
@@ -125,7 +126,7 @@ describe('list_sprints', () => {
   it('lists closed sprints on request', async () => {
     expect(await ask('list_sprints', { closed: true })).toBe(
       'Acme Billing · closed sprints: 1 sprint.\n' +
-        '- Sprint 6 · 2026-02-16 to 2026-02-27 · 1 story · 21 of 21 points done',
+        '- Sprint 6 · 2026-02-16 to 2026-02-27 · 1 of 1 story done · 21 of 21 points done',
     );
   });
 });
@@ -184,8 +185,8 @@ describe('list_epics', () => {
     expect(await ask('list_epics')).toBe(
       [
         'Acme Billing: 2 epics.',
-        '- #12 Card payments · In progress · Linh Tran · stories: 2.5 of 8 done (31%)',
-        '- #9 Invoices · Done (closed) · unassigned · stories: no stories',
+        '- #12 Card payments · In progress · Linh Tran · 8 stories, 31% done',
+        '- #9 Invoices · Done (closed) · unassigned · no stories',
       ].join('\n'),
     );
   });
@@ -225,7 +226,7 @@ describe('get_item', () => {
         'Project: Acme Billing',
         'Status: In progress',
         'Assigned to: Linh Tran',
-        'Stories: 2.5 of 8 done (31%)',
+        'Stories: 8 stories, 31% done',
         'Created: 2026-01-05 by Kiet',
         'Last changed: 2026-03-08',
         '',

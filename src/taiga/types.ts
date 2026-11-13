@@ -51,7 +51,9 @@ export interface RawSprint {
   readonly closed: boolean;
   readonly total_points: number | null;
   readonly closed_points: number | null;
-  readonly user_stories?: readonly unknown[];
+  readonly user_stories?: readonly {
+    readonly status_extra_info?: { readonly is_closed?: boolean } | null;
+  }[];
 }
 
 /** A tag arrives as a name, or as a `[name, colour]` pair. */
@@ -159,6 +161,7 @@ export interface SprintSummary {
   readonly totalPoints: number;
   readonly closedPoints: number;
   readonly stories: number;
+  readonly storiesDone: number;
 }
 
 interface ItemSummary {

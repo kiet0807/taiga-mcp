@@ -1,6 +1,32 @@
 /** The few pages a person sees: the front page, the sign-in form, and a dead end. No scripts. */
 
+import { createHash } from 'node:crypto';
 import { SERVER_INFO } from '../server.js';
+
+/**
+ * The one script any page carries: copy buttons on the front page. The buttons start hidden, so
+ * without scripts nobody sees a button that does nothing. Allowed by its hash in the
+ * Content-Security-Policy, so no other script can run.
+ */
+const COPY_SCRIPT =
+  "(function(){var s=document.getElementById('copy-status');" +
+  "document.querySelectorAll('button[data-copy]').forEach(function(b){b.hidden=false;" +
+  "b.addEventListener('click',function(){var t=document.getElementById(b.getAttribute('data-copy'));" +
+  'if(!t||!navigator.clipboard)return;navigator.clipboard.writeText(t.textContent).then(function(){' +
+  "b.classList.add('done');if(s)s.textContent=s.getAttribute('data-done');" +
+  "setTimeout(function(){b.classList.remove('done');if(s)s.textContent='';},1600);});});});})();";
+
+/** For the Content-Security-Policy: the only script allowed to run. */
+export const SCRIPT_HASH = `'sha256-${createHash('sha256').update(COPY_SCRIPT).digest('base64')}'`;
+
+const COPY_ICON =
+  '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>' +
+  '<svg class="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>';
+
+/** Text to copy, in a box with a copy button (shown once the script runs). */
+function snippet(tag: 'code' | 'pre', id: string, text: string, label: string): string {
+  return `<div class="snippet"><${tag} id="${id}">${escape(text)}</${tag}><button type="button" class="copy" data-copy="${id}" aria-label="${escape(label)}" title="${escape(label)}" hidden>${COPY_ICON}</button></div>`;
+}
 
 export type Lang = 'en' | 'vi';
 
@@ -75,9 +101,18 @@ const TEXT = {
       'Ask in plain words. Claude looks the answer up in Taiga.',
     ],
     otherApps: 'Other AI apps',
+    webApps: 'In the browser',
+    toolApps: 'In an editor or a terminal',
+    copy: 'Copy',
+    copied: 'Copied',
     otherAppsLead:
       'Any app that supports remote MCP servers connects with the same address, and asks you to sign in to Taiga the first time. Menus move between versions: if a step looks different, look for “MCP”, “connector” or “tools” in the app’s settings.',
     howTo: {
+      claude: 'The steps above, on claude.ai or in the Claude desktop app.',
+      lechat:
+        'Connectors → + Add Connector → Custom MCP Connector tab. Name it taiga (no spaces), paste the address, press Connect and sign in. Only the administrator of the Le Chat account can add connectors; on Free and Pro plans that is the account owner.',
+      perplexity:
+        'Plugins in the sidebar (or Customize → Connectors) → Add custom → Add MCP connector → Remote. Name it Taiga, paste the address, set Authentication to OAuth and Transport to Streamable HTTP, tick the acknowledgement and press Add. Then open the connector card to sign in. In an organization, an administrator must first allow members to add custom connectors.',
       claudeCode: 'In a terminal, then type /mcp in Claude Code and choose taiga to sign in:',
       chatgpt:
         'Settings → Apps & Connectors → Advanced settings: turn on Developer mode. Then Create, paste the address, choose OAuth and sign in. Needs a plan with developer mode.',
@@ -162,9 +197,18 @@ const TEXT = {
       'Hỏi bằng lời bình thường. Claude sẽ tra câu trả lời trên Taiga.',
     ],
     otherApps: 'Ứng dụng AI khác',
+    webApps: 'Trên trình duyệt',
+    toolApps: 'Trong editor hoặc terminal',
+    copy: 'Sao chép',
+    copied: 'Đã sao chép',
     otherAppsLead:
       'Ứng dụng nào hỗ trợ MCP server từ xa cũng kết nối bằng cùng địa chỉ này, và lần đầu sẽ yêu cầu bạn đăng nhập Taiga. Menu có thể thay đổi giữa các phiên bản: nếu không thấy đúng như dưới đây, hãy tìm mục “MCP”, “connector” hoặc “tools” trong cài đặt của ứng dụng.',
     howTo: {
+      claude: 'Làm theo các bước ở trên, trên claude.ai hoặc trong app Claude cho máy tính.',
+      lechat:
+        'Connectors → + Add Connector → tab Custom MCP Connector. Đặt tên taiga (không dấu cách), dán địa chỉ, bấm Connect rồi đăng nhập. Chỉ quản trị viên của tài khoản Le Chat mới thêm được connector; với gói Free và Pro, đó là chủ tài khoản.',
+      perplexity:
+        'Plugins ở thanh bên (hoặc Customize → Connectors) → Add custom → Add MCP connector → Remote. Đặt tên Taiga, dán địa chỉ, chọn Authentication là OAuth và Transport là Streamable HTTP, tick ô xác nhận rồi bấm Add. Sau đó mở thẻ connector để đăng nhập. Trong tổ chức, quản trị viên phải bật cho thành viên tự thêm connector trước.',
       claudeCode: 'Chạy trong terminal, rồi gõ /mcp trong Claude Code và chọn taiga để đăng nhập:',
       chatgpt:
         'Settings → Apps & Connectors → Advanced settings: bật Developer mode. Sau đó bấm Create, dán địa chỉ, chọn OAuth và đăng nhập. Cần gói có Developer mode.',
@@ -269,12 +313,25 @@ pre { margin: 8px 0 0; padding: 10px 12px; overflow-x: auto; user-select: all; w
   font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: var(--inset);
   border: 1px solid var(--line); border-radius: 10px; }
 .apps { margin: 0 0 16px; }
+.group { margin: 16px 0 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+.snippet { display: flex; align-items: flex-start; gap: 6px; margin-top: 6px; background: var(--inset);
+  border: 1px solid var(--line); border-radius: 10px; }
+.snippet code, .snippet pre { flex: 1; min-width: 0; margin: 0; background: none; border: 0; }
+.copy { flex: none; display: grid; place-items: center; width: 30px; height: 30px; margin: 4px 4px 4px 0; padding: 0;
+  color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.copy:hover { color: var(--text); background: var(--inset); }
+.copy[hidden] { display: none; }
+.copy svg { width: 16px; height: 16px; }
+.copy .ok, .copy.done .icon { display: none; }
+.copy.done .ok { display: block; color: var(--ring); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 details { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; }
 details[open] { border-color: var(--field); }
 summary { padding: 9px 12px; font-size: 14px; font-weight: 600; cursor: pointer; list-style-position: inside; }
 summary::marker { color: var(--ring); }
 summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 10px; }
-details > p, details > pre { margin-left: 12px; margin-right: 12px; }
+details > p, details > .snippet { margin-left: 12px; margin-right: 12px; }
+details > .snippet { margin-top: 8px; }
 details > p { margin-top: 0; margin-bottom: 0; font-size: 14px; }
 details > :last-child { margin-bottom: 12px; }
 `;
@@ -321,7 +378,7 @@ function page(
   lang: Lang,
   title: string,
   body: string,
-  options: { listed?: Listed; wide?: boolean } = {},
+  options: { listed?: Listed; wide?: boolean; script?: boolean } = {},
 ): string {
   return `<!doctype html>
 <html lang="${lang}">
@@ -341,7 +398,7 @@ ${options.listed ? listedHead(lang, title, options.listed) : ''}<meta name="them
 <main${options.wide ? ' class="wide"' : ''}>
 ${body}
 </main>
-</body>
+${options.script ? `<script>${COPY_SCRIPT}</script>\n` : ''}</body>
 </html>
 `;
 }
@@ -438,22 +495,41 @@ export function expiredPage(lang: Lang): string {
  * How to add the server in AI apps other than Claude, each as a closed section: what to do,
  * and the command or configuration to copy, with this server's address already in it.
  */
-function otherApps(how: (typeof TEXT)[Lang]['howTo'], mcpUrl: string): string[] {
+function otherApps(t: (typeof TEXT)[Lang], mcpUrl: string): string {
+  const how = t.howTo;
   const json = (value: unknown) => JSON.stringify(value, null, 2);
-  const apps: readonly (readonly [name: string, what: string, copy?: string])[] = [
-    ['Claude Code', how.claudeCode, `claude mcp add --transport http taiga ${mcpUrl}`],
+  type App = readonly [name: string, what: string, copy?: string];
+  const web: readonly App[] = [
+    ['Claude', how.claude],
     ['ChatGPT', how.chatgpt],
+    ['Le Chat (Mistral)', how.lechat],
+    ['Perplexity', how.perplexity],
+  ];
+  const tools: readonly App[] = [
+    ['Claude Code', how.claudeCode, `claude mcp add --transport http taiga ${mcpUrl}`],
     ['VS Code (GitHub Copilot)', how.vscode, json({ servers: { taiga: { type: 'http', url: mcpUrl } } })],
     ['Cursor', how.cursor, json({ mcpServers: { taiga: { url: mcpUrl } } })],
+    ['Windsurf', how.windsurf, json({ mcpServers: { taiga: { serverUrl: mcpUrl } } })],
     ['Gemini CLI', how.gemini, json({ mcpServers: { taiga: { httpUrl: mcpUrl } } })],
     ['Codex CLI', how.codex, `codex mcp add taiga --url ${mcpUrl}\ncodex mcp login taiga`],
-    ['Windsurf', how.windsurf, json({ mcpServers: { taiga: { serverUrl: mcpUrl } } })],
     [how.otherName, how.other],
   ];
-  return apps.map(
-    ([name, what, copy]) =>
-      `<details><summary>${escape(name)}</summary><p>${escape(what)}</p>${copy === undefined ? '' : `<pre>${escape(copy)}</pre>`}</details>`,
-  );
+  let n = 0;
+  const details = (apps: readonly App[]) =>
+    apps
+      .map(([name, what, copy]) => {
+        n += 1;
+        return `<details><summary>${escape(name)}</summary><p>${escape(what)}</p>${copy === undefined ? '' : snippet('pre', `copy-${n}`, copy, t.copy)}</details>`;
+      })
+      .join('\n');
+  return `<h3 class="group">${escape(t.webApps)}</h3>
+<div class="apps">
+${details(web)}
+</div>
+<h3 class="group">${escape(t.toolApps)}</h3>
+<div class="apps">
+${details(tools)}
+</div>`;
 }
 
 /** Who made this, for the foot of the front page. */
@@ -491,7 +567,7 @@ ${facts.map(([name, what]) => `<li><strong>${escape(name)}</strong>${escape(what
 </ul>
 <h2>${escape(t.connect)}</h2>
 <ol>
-<li>${escape(copy)}<code>${escape(at('/mcp'))}</code></li>
+<li>${escape(copy)}${snippet('code', 'copy-address', at('/mcp'), t.copy)}</li>
 ${steps.map((step) => `<li>${escape(step)}</li>`).join('\n')}
 </ol>
 <h2>${escape(t.asks)}</h2>
@@ -500,12 +576,12 @@ ${examples.map((example) => `<li>${escape(example)}</li>`).join('\n')}
 </ul>
 <h2>${escape(t.otherApps)}</h2>
 <p class="note">${escape(t.otherAppsLead)}</p>
-<div class="apps">
-${otherApps(t.howTo, at('/mcp')).join('\n')}
-</div>
+${otherApps(t, at('/mcp'))}
+<p id="copy-status" class="sr-only" role="status" data-done="${escape(t.copied)}"></p>
 <footer>taiga-mcp ${escape(SERVER_INFO.version)} · ${escape(t.builtBy)} <a href="${AUTHOR.url}" rel="author">${AUTHOR.name}</a></footer>`,
     {
       wide: true,
+      script: true,
       listed: {
         description: allowWrites ? t.descriptionWrite : t.description,
         url: at(chosen === undefined ? '/' : `/?lang=${chosen}`),

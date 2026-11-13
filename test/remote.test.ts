@@ -344,7 +344,7 @@ describe('the hosted server', () => {
     const home = await fetch(base, { headers: { 'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.5' } });
     const html = await home.text();
     expect(html).toContain('Taiga cho trợ lý AI');
-    expect(html).toContain(`<code>${base}/mcp</code>`);
+    expect(html).toContain(`<code id="copy-address">${base}/mcp</code>`);
   });
 
   it('lets the front page be found, with a description and a preview image', async () => {
@@ -382,8 +382,11 @@ describe('the hosted server', () => {
     const { base } = await start();
     const html = await (await fetch(base, { headers: { 'Accept-Language': 'en' } })).text();
     for (const app of [
-      'Claude Code',
+      'Claude',
       'ChatGPT',
+      'Le Chat (Mistral)',
+      'Perplexity',
+      'Claude Code',
       'VS Code (GitHub Copilot)',
       'Cursor',
       'Gemini CLI',
@@ -392,10 +395,35 @@ describe('the hosted server', () => {
     ]) {
       expect(html, app).toContain(`<summary>${app}</summary>`);
     }
+    // Apps in the browser first, then editors and terminals.
+    expect(html.indexOf('In the browser')).toBeLessThan(html.indexOf('In an editor or a terminal'));
     expect(html).toContain(`claude mcp add --transport http taiga ${base}/mcp`);
     // The configuration is JSON as the app reads it, with quotes escaped for HTML.
     expect(html).toContain(`&quot;httpUrl&quot;: &quot;${base}/mcp&quot;`);
-    expect(html).not.toMatch(/<script/i);
+  });
+
+  it('offers to copy the address and each snippet, with the one script the policy allows', async () => {
+    const { base } = await start();
+    const response = await fetch(base, { headers: { 'Accept-Language': 'en' } });
+    const html = await response.text();
+    // The address and the six snippets each get a button, hidden until the script shows it.
+    expect(html).toContain(`<code id="copy-address">${base}/mcp</code>`);
+    expect(
+      html.match(/<button type="button" class="copy" data-copy="[^"]+" aria-label="Copy"/g),
+    ).toHaveLength(7);
+    expect(html.match(/class="copy"[^>]* hidden>/g)).toHaveLength(7);
+    // One inline script, allowed by its hash and by nothing else.
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1] ?? '');
+    expect(scripts).toHaveLength(1);
+    const hash = createHash('sha256')
+      .update(scripts[0] ?? '')
+      .digest('base64');
+    const policy = response.headers.get('content-security-policy') ?? '';
+    expect(/script-src ([^;]+);/.exec(policy)?.[1]).toBe(`'sha256-${hash}'`);
+
+    // The sign-in page, where the password is typed, runs no script at all.
+    const { html: login } = await openLogin(base, await register(base));
+    expect(login).not.toMatch(/<script/i);
   });
 
   it('keeps the sign-in page out of search and link previews', async () => {

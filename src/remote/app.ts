@@ -11,7 +11,7 @@ import { createServer } from '../server.js';
 import { TaigaClient } from '../taiga/client.js';
 import { TaigaError } from '../taiga/http.js';
 import { guardedFetch } from './guard.js';
-import { expiredPage, homePage, loginPage, type Lang, type LoginError } from './pages.js';
+import { expiredPage, homePage, loginPage, SCRIPT_HASH, type Lang, type LoginError } from './pages.js';
 import { READ, TaigaOAuthProvider, WRITE } from './provider.js';
 import { Sealer } from './seal.js';
 import { TaigaAuth } from './taiga-auth.js';
@@ -62,15 +62,15 @@ function langOf(req: Request): Lang {
 
 /**
  * Pages with a password field: never cached, never framed, nothing loaded from elsewhere
- * (the only thing loaded at all is this server's own icon).
+ * (the only thing loaded at all is this server's own icon). The only script allowed is the copy
+ * buttons' on the front page, by its hash; the sign-in page carries none.
  */
 function sendPage(res: Response, status: number, html: string): void {
   res
     .status(status)
     .set({
       'Cache-Control': 'no-store',
-      'Content-Security-Policy':
-        "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'",
+      'Content-Security-Policy': `default-src 'none'; script-src ${SCRIPT_HASH}; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'`,
       // The same address answers in English or Vietnamese.
       Vary: 'Accept-Language',
       'Referrer-Policy': 'no-referrer',

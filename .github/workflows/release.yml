@@ -1,0 +1,53 @@
+name: Release
+
+# Push a tag such as v0.4.1 (after setting that version in package.json, server.json and
+# SERVER_INFO in src/server.ts) to publish it to npm and to the MCP Registry.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write # npm provenance and signing in to the MCP Registry as this repository
+
+jobs:
+  publish:
+    name: npm and MCP Registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tag, package.json and server.json agree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          node -e '
+            const tag = process.argv[1];
+            const pkg = require("./package.json").version;
+            const srv = require("./server.json");
+            const versions = [pkg, srv.version, ...srv.packages.map((p) => p.version)];
+            if (versions.some((v) => v !== tag)) {
+              console.error(`Tag ${tag} but package.json/server.json say ${versions.join(", ")}`);
+              process.exit(1);
+            }
+          ' "$tag"
+
+      # prepublishOnly runs pnpm check (types, lint, format, tests, build) first.
+      - run: npm publish --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to the MCP Registry
+        run: |
+          curl -sSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

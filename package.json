@@ -1,10 +1,36 @@
 {
-  "name": "taiga-mcp",
+  "name": "@kiet0807/taiga-mcp",
   "version": "0.4.0",
   "description": "A Model Context Protocol server for Taiga: ask an AI assistant about your projects, sprints, user stories, issues and epics, and, if you allow it, have it create and update them.",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "taiga",
+    "taiga-io",
+    "project-management",
+    "agile",
+    "scrum",
+    "claude",
+    "cursor",
+    "copilot",
+    "ai"
+  ],
+  "author": {
+    "name": "Kiet Nguyen",
+    "url": "https://kietnguyen.io.vn"
+  },
+  "homepage": "https://github.com/kiet0807/taiga-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kiet0807/taiga-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kiet0807/taiga-mcp/issues"
+  },
   "type": "module",
-  "private": true,
   "license": "MIT",
+  "mcpName": "io.github.kiet0807/taiga-mcp",
   "engines": {
     "node": ">=20.6.0"
   },
@@ -26,7 +52,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build",
+    "prepublishOnly": "pnpm check"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
@@ -46,5 +73,8 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.2",
     "vitest": "^5.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

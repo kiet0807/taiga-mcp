@@ -1,0 +1,57 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.kiet0807/taiga-mcp",
+  "description": "Sprints, stories, tasks, issues, epics, wiki and attached files in Taiga; writes only when allowed.",
+  "websiteUrl": "https://taiga.kietnguyen.io.vn",
+  "repository": {
+    "url": "https://github.com/kiet0807/taiga-mcp",
+    "source": "github"
+  },
+  "version": "0.4.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@kiet0807/taiga-mcp",
+      "version": "0.4.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TAIGA_URL",
+          "description": "Address of the Taiga API host, e.g. https://api.taiga.io",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "TAIGA_USERNAME",
+          "description": "Taiga username (or set TAIGA_TOKEN instead)",
+          "format": "string"
+        },
+        {
+          "name": "TAIGA_PASSWORD",
+          "description": "Taiga password",
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "TAIGA_TOKEN",
+          "description": "A Taiga token, instead of username and password",
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "TAIGA_WRITE",
+          "description": "true lets the AI create, change and comment on items (off by default; nothing can be deleted)",
+          "format": "boolean"
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://taiga.kietnguyen.io.vn/mcp"
+    }
+  ]
+}

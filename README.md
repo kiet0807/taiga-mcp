@@ -1,15 +1,46 @@
 # taiga-mcp
 
+[![CI](https://github.com/kiet0807/taiga-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/kiet0807/taiga-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@kiet0807/taiga-mcp)](https://www.npmjs.com/package/@kiet0807/taiga-mcp)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Taiga](https://taiga.io). It lets an AI assistant such as Claude, ChatGPT, Copilot or Cursor answer questions about your Taiga projects without you opening Taiga: sprints, user stories, tasks, issues, epics and the wiki. It reads by default; if you switch it on, it can also create items, change them and comment. It can never delete anything.
+
+<!-- A short demo goes here: ![Asking Claude about a Taiga sprint](docs/demo.gif) -->
+
+## Try it in 30 seconds
+
+Nothing to install. In Claude, open Settings → Connectors → Add custom connector and paste:
+
+```text
+https://taiga.kietnguyen.io.vn/mcp
+```
+
+Sign in with your own Taiga account, on Taiga cloud or any Taiga reachable from the internet, then ask:
+
+- "What is left in the current sprint?"
+- "What does #123 say, and who has it?"
+- "Read the spreadsheet attached to #456 and list the rows marked urgent."
+
+Other apps (ChatGPT, Claude Code, Cursor, VS Code, Gemini CLI, Codex, Windsurf): see [Connecting an app](#connecting-an-app). Your password is passed to Taiga once and never stored ([how signing in works](#how-signing-in-works)); if you would rather nobody else's server saw it, [run it on your machine](#setup) or [host your own](#hosted-server).
+
+## Why this one
+
+- **Reads what is attached.** PDFs, Word, Excel, PowerPoint, CSV and pictures attached to an item, in parts when they are large.
+- **Nothing to install for a team.** One address, and each person signs in with their own Taiga account (OAuth). No keys to hand around, no database.
+- **Writes only when allowed, never deletes.** Creating, changing and commenting are off until switched on, refuse to overwrite someone else's change, and show every field before and after.
+- **Sprints the way a team talks about them.** Points done, stories done, burndown day by day, and what happened this week, by person.
+- **Names, not ids.** Statuses, people, sprints and tags by name (no accents needed), items by `#123`; errors say what to try next.
+- **Any Taiga.** Taiga cloud or self-hosted (for a Taiga inside a company network, [host your own](#hosted-server)); sign-in pages in English and Vietnamese.
 
 How it works inside, flow by flow, with links into the code: [docs/how-it-works.md](docs/how-it-works.md).
 
 It runs in two ways:
 
-- **On your machine** (stdio), for one person, with the Taiga account in a local `.env` file. See [Setup](#setup).
+- **On your machine** (stdio), for one person, with the Taiga account in its settings. See [Setup](#setup).
 - **Hosted** (HTTP), for a team, including people who never open a terminal: they paste one address into their AI assistant and sign in with their own Taiga account. See [Hosted server](#hosted-server).
 
-**Status:** fourteen tools that read and three that write (off unless switched on), covered by tests against a fake Taiga; the reading tools are also checked against a public project on Taiga cloud. A hosted instance runs at [taiga.kietnguyen.io.vn](https://taiga.kietnguyen.io.vn). Not published to npm.
+**Status:** fourteen tools that read and three that write (off unless switched on), covered by tests against a fake Taiga; the reading tools are also checked against a public project on Taiga cloud. A hosted instance runs at [taiga.kietnguyen.io.vn](https://taiga.kietnguyen.io.vn).
 
 ## Tools
 
@@ -98,7 +129,40 @@ Files larger than 10 MB are not downloaded. A file is fetched from the signed ad
 
 ## Setup
 
-Requires Node.js 20.6 or newer and [pnpm](https://pnpm.io).
+Requires Node.js 20.6 or newer. The server is on npm as [`@kiet0807/taiga-mcp`](https://www.npmjs.com/package/@kiet0807/taiga-mcp); `npx` fetches and runs it, so there is nothing to clone.
+
+Claude Code:
+
+```bash
+claude mcp add taiga \
+  -e TAIGA_URL=https://api.taiga.io \
+  -e TAIGA_USERNAME=you -e TAIGA_PASSWORD='your password' \
+  -- npx -y @kiet0807/taiga-mcp
+```
+
+Claude Desktop (`claude_desktop_config.json`), Cursor (`~/.cursor/mcp.json`) and most other apps take the same block:
+
+```json
+{
+  "mcpServers": {
+    "taiga": {
+      "command": "npx",
+      "args": ["-y", "@kiet0807/taiga-mcp"],
+      "env": {
+        "TAIGA_URL": "https://api.taiga.io",
+        "TAIGA_USERNAME": "you",
+        "TAIGA_PASSWORD": "your password"
+      }
+    }
+  }
+}
+```
+
+For a self-hosted Taiga, `TAIGA_URL` is usually the address you open Taiga at. Add `"TAIGA_WRITE": "true"` to let the AI create, change and comment.
+
+### From source
+
+Requires [pnpm](https://pnpm.io).
 
 ```bash
 pnpm install
@@ -113,9 +177,9 @@ cp .env.example .env   # then fill in TAIGA_URL and how to sign in
 | `TAIGA_TOKEN`, `TAIGA_REFRESH_TOKEN` | Or use tokens you already have; without a password they cannot be replaced       |
 | `TAIGA_WRITE`                        | `true` adds the tools that create and change items, and comment (off by default) |
 
-Credentials stay in `.env` on your machine. The file is git-ignored and the server never prints them.
+The same variables go in the `env` block above when you run it with `npx`. Credentials stay in `.env` on your machine. The file is git-ignored and the server never prints them.
 
-## Try it
+## Try it from source
 
 Open the MCP Inspector, a browser page where you can call each tool by hand:
 

@@ -41,10 +41,28 @@ jobs:
             }
           ' "$tag"
 
+      # Skipped when this version is already on npm, so a re-run can finish the registry step.
       # prepublishOnly runs pnpm check (types, lint, format, tests, build) first.
-      - run: npm publish --provenance
+      - name: Publish to npm
+        run: |
+          name="$(node -p 'require("./package.json").name')"
+          if npm view "$name@${GITHUB_REF_NAME#v}" version >/dev/null 2>&1; then
+            echo "$name@${GITHUB_REF_NAME#v} is already on npm"
+          else
+            npm publish --provenance
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The registry looks the package up on npm, which can take a minute to show a new version.
+      - name: Wait until npm serves this version
+        run: |
+          name="$(node -p 'require("./package.json").name')"
+          for i in $(seq 1 30); do
+            npm view "$name@${GITHUB_REF_NAME#v}" version >/dev/null 2>&1 && exit 0
+            sleep 10
+          done
+          echo "npm still does not show $name@${GITHUB_REF_NAME#v}" && exit 1
 
       - name: Publish to the MCP Registry
         run: |

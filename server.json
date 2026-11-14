@@ -11,7 +11,7 @@
   "packages": [
     {
       "registryType": "npm",
-      "identifier": "@kiet0807/taiga-mcp",
+      "identifier": "@kietdev/taiga-mcp",
       "version": "0.4.0",
       "transport": {
         "type": "stdio"

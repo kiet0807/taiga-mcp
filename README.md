@@ -1,7 +1,7 @@
 # taiga-mcp
 
 [![CI](https://github.com/kiet0807/taiga-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/kiet0807/taiga-mcp/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@kiet0807/taiga-mcp)](https://www.npmjs.com/package/@kiet0807/taiga-mcp)
+[![npm](https://img.shields.io/npm/v/@kietdev/taiga-mcp)](https://www.npmjs.com/package/@kietdev/taiga-mcp)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Taiga](https://taiga.io). It lets an AI assistant such as Claude, ChatGPT, Copilot or Cursor answer questions about your Taiga projects without you opening Taiga: sprints, user stories, tasks, issues, epics and the wiki. It reads by default; if you switch it on, it can also create items, change them and comment. It can never delete anything.
@@ -129,7 +129,7 @@ Files larger than 10 MB are not downloaded. A file is fetched from the signed ad
 
 ## Setup
 
-Requires Node.js 20.6 or newer. The server is on npm as [`@kiet0807/taiga-mcp`](https://www.npmjs.com/package/@kiet0807/taiga-mcp); `npx` fetches and runs it, so there is nothing to clone.
+Requires Node.js 20.6 or newer. The server is on npm as [`@kietdev/taiga-mcp`](https://www.npmjs.com/package/@kietdev/taiga-mcp); `npx` fetches and runs it, so there is nothing to clone.
 
 Claude Code:
 
@@ -137,7 +137,7 @@ Claude Code:
 claude mcp add taiga \
   -e TAIGA_URL=https://api.taiga.io \
   -e TAIGA_USERNAME=you -e TAIGA_PASSWORD='your password' \
-  -- npx -y @kiet0807/taiga-mcp
+  -- npx -y @kietdev/taiga-mcp
 ```
 
 Claude Desktop (`claude_desktop_config.json`), Cursor (`~/.cursor/mcp.json`) and most other apps take the same block:
@@ -147,7 +147,7 @@ Claude Desktop (`claude_desktop_config.json`), Cursor (`~/.cursor/mcp.json`) and
   "mcpServers": {
     "taiga": {
       "command": "npx",
-      "args": ["-y", "@kiet0807/taiga-mcp"],
+      "args": ["-y", "@kietdev/taiga-mcp"],
       "env": {
         "TAIGA_URL": "https://api.taiga.io",
         "TAIGA_USERNAME": "you",

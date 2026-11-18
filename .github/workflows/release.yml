@@ -7,7 +7,7 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: read
+  contents: write # the GitHub Release
   id-token: write # npm provenance and signing in to the MCP Registry as this repository
 
 jobs:
@@ -69,3 +69,12 @@ jobs:
           curl -sSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
+
+      # Glama and people watching the repository pick up new versions from GitHub Releases.
+      # Skipped when the release exists, so a re-run can finish.
+      - name: GitHub Release
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+        env:
+          GH_TOKEN: ${{ github.token }}

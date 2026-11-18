@@ -13,4 +13,19 @@ export default tseslint.config(
       'no-console': ['error', { allow: ['error'] }],
     },
   },
+  {
+    // Scripts run by hand or in GitHub Actions, outside the MCP protocol: they may print.
+    files: ['scripts/**'],
+    languageOptions: {
+      globals: {
+        AbortSignal: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        console: 'readonly',
+        fetch: 'readonly',
+        process: 'readonly',
+      },
+    },
+    rules: { 'no-console': 'off' },
+  },
 );

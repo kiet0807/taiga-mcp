@@ -278,6 +278,7 @@ pnpm test    # tests only; Taiga is faked, no network or account needed
 - `public/` holds the icons, the link-preview image and `robots.txt`; `design/og.html` is the source of the preview image.
 - `test/acme.ts` is the invented project the tests run against.
 - CI (`.github/workflows/ci.yml`) runs `pnpm check` on every push and pull request.
+- `scripts/live-check.mjs` checks the hosted server from outside, without an account; `.github/workflows/live.yml` runs it once a day. Pushing a `v*` tag runs `.github/workflows/release.yml`: npm, the MCP Registry, then a GitHub Release.
 
 The stdio server speaks MCP on stdout, so nothing else may be printed there. Diagnostics go to stderr.
 

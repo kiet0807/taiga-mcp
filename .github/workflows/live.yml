@@ -1,0 +1,25 @@
+name: Live check
+
+# Checks the hosted server at taiga.kietnguyen.io.vn once a day, from outside and without an
+# account (scripts/live-check.mjs). GitHub emails the repository owner when a scheduled run fails.
+on:
+  schedule:
+    - cron: '23 0 * * *' # 07:23 in Vietnam
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: Hosted server answers
+    # Forks have no hosted server of their own to check.
+    if: github.repository == 'kiet0807/taiga-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/live-check.mjs

@@ -25,6 +25,9 @@ jobs:
           node-version: 22
           cache: pnpm
           registry-url: https://registry.npmjs.org
+      # Trusted publishing (npm checks this workflow's GitHub identity; no token) needs npm 11.5.1
+      # or newer, and Node 22 comes with npm 10.
+      - run: npm install -g npm@^11.5.1
       - run: pnpm install --frozen-lockfile
 
       - name: Tag, package.json and server.json agree
@@ -52,6 +55,8 @@ jobs:
             npm publish --provenance
           fi
         env:
+          # npm tries trusted publishing first. The token is only the fallback until a release
+          # shows trusted publishing works; then the NPM_TOKEN secret and this line go.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # The registry looks the package up on npm, which can take a minute to show a new version.

@@ -1,6 +1,6 @@
 name: Live check
 
-# Checks the hosted server at taiga.kietnguyen.io.vn once a day, from outside and without an
+# Checks the hosted server at taiga.kaidev.io.vn once a day, from outside and without an
 # account (scripts/live-check.mjs). GitHub emails the repository owner when a scheduled run fails.
 on:
   schedule:

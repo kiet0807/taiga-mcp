@@ -1,14 +1,14 @@
 // Checks the hosted server from outside, without any account: what someone connecting for the
 // first time goes through. .github/workflows/live.yml runs it once a day.
 //
-//   node scripts/live-check.mjs [https://taiga.kietnguyen.io.vn]
+//   node scripts/live-check.mjs [https://taiga.kaidev.io.vn]
 //
 // It makes one sign-in attempt, with a made-up account at Taiga cloud. Taiga refusing it proves
 // the server can reach Taiga. The server allows 10 attempts per 15 minutes from one address.
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
-const base = (process.argv[2] ?? 'https://taiga.kietnguyen.io.vn').replace(/\/+$/, '');
+const base = (process.argv[2] ?? 'https://taiga.kaidev.io.vn').replace(/\/+$/, '');
 const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const redirect = 'http://localhost:53999/callback';
 

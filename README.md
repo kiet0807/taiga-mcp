@@ -13,7 +13,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [Taiga](h
 Nothing to install. In Claude, open Settings → Connectors → Add custom connector and paste:
 
 ```text
-https://taiga.kietnguyen.io.vn/mcp
+https://taiga.kaidev.io.vn/mcp
 ```
 
 Sign in with your own Taiga account, on Taiga cloud or any Taiga reachable from the internet, then ask:
@@ -40,7 +40,7 @@ It runs in two ways:
 - **On your machine** (stdio), for one person, with the Taiga account in its settings. See [Setup](#setup).
 - **Hosted** (HTTP), for a team, including people who never open a terminal: they paste one address into their AI assistant and sign in with their own Taiga account. See [Hosted server](#hosted-server).
 
-**Status:** fourteen tools that read and three that write (off unless switched on), covered by tests against a fake Taiga; the reading tools are also checked against a public project on Taiga cloud. A hosted instance runs at [taiga.kietnguyen.io.vn](https://taiga.kietnguyen.io.vn).
+**Status:** fourteen tools that read and three that write (off unless switched on), covered by tests against a fake Taiga; the reading tools are also checked against a public project on Taiga cloud. A hosted instance runs at [taiga.kaidev.io.vn](https://taiga.kaidev.io.vn).
 
 ## Tools
 

@@ -17,7 +17,7 @@ import { registerSearch } from './tools/search.js';
 import { registerUpdateItem } from './tools/update-item.js';
 import { registerWiki } from './tools/wiki.js';
 
-export const SERVER_INFO = { name: 'taiga-mcp', version: '0.4.2' } as const;
+export const SERVER_INFO = { name: 'taiga-mcp', version: '0.4.3' } as const;
 
 const HOW_TO_READ =
   'Projects are addressed by slug: call list_projects to find it. Stories, issues, epics and tasks ' +

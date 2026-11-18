@@ -268,7 +268,7 @@ still recorded: each item's history (`get_item` with `changes`).
 | `MCP_SECRET`   | At least 32 random characters: the key of `seal()`                                                                   |
 | `ALLOW_WRITES` | Whether the sign-in page offers the box that allows changes; turning it off takes writing away from everyone at once |
 
-The instance at [taiga.kietnguyen.io.vn](https://taiga.kietnguyen.io.vn) runs with `ANY_TAIGA=true` and
+The instance at [taiga.kaidev.io.vn](https://taiga.kaidev.io.vn) runs with `ANY_TAIGA=true` and
 `ALLOW_WRITES=true`.
 
 ---

@@ -40,7 +40,7 @@ jobs:
     name: npm and MCP Registry
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -83,11 +83,13 @@ jobs:
         # No token: npm takes this workflow as the package's trusted publisher (set on npmjs.com:
         # kiet0807/taiga-mcp, release.yml) and hands it a short-lived one for this run.
 
-      # The registry looks the package up on npm, which can take a minute to show a new version.
+      # The registry looks the package up on npm, which "processes" a new version before serving
+      # it: a minute for 0.4.1, more than five for 0.4.2. Up to 20 minutes here.
       - name: Wait until npm serves this version
+        timeout-minutes: 21
         run: |
           name="$(node -p 'require("./package.json").name')"
-          for i in $(seq 1 30); do
+          for i in $(seq 1 120); do
             npm view "$name@${GITHUB_REF_NAME#v}" version >/dev/null 2>&1 && exit 0
             sleep 10
           done

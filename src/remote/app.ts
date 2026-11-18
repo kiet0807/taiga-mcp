@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from '../server.js';
 import { TaigaClient } from '../taiga/client.js';
 import { TaigaError } from '../taiga/http.js';
-import { guardedFetch } from './guard.js';
+import { guardedFetch, TAIGA_CLOUD_API, taigaAddress } from './guard.js';
 import { expiredPage, homePage, loginPage, SCRIPT_HASH, type Lang, type LoginError } from './pages.js';
 import { READ, TaigaOAuthProvider, WRITE } from './provider.js';
 import { Sealer } from './seal.js';
@@ -202,7 +202,9 @@ export function createApp(options: AppOptions): Express {
         console.error(`taiga-mcp: sign-in could not be checked: ${String(error)}`);
         // At a typed address, anything but "busy" or "broken" most likely means it is not a Taiga.
         const busy = error instanceof TaigaError && (error.status === 429 || (error.status ?? 0) >= 500);
-        if (anyTaiga && !busy) showLoginAgain(req, res, 400, 'badAddress');
+        // Taiga cloud is a Taiga for certain: when it fails, the address was not the problem.
+        const cloud = typeof address === 'string' && taigaAddress(address) === TAIGA_CLOUD_API;
+        if (anyTaiga && !busy && !cloud) showLoginAgain(req, res, 400, 'badAddress');
         else showLoginAgain(req, res, 502, 'unavailable');
       }
     },

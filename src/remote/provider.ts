@@ -32,6 +32,14 @@ const MARGIN_SECONDS = MINUTE;
 /** For Taiga tokens that do not carry an expiry. */
 const FALLBACK_ACCESS_SECONDS = 7 * DAY;
 const FALLBACK_REFRESH_SECONDS = 7 * DAY;
+/**
+ * How long a refresh token, once used, still answers with the pair it was traded for. Taiga
+ * accepts each of its refresh tokens once, so an app that retries a renewal whose answer it
+ * lost, or renews twice at the same moment, would otherwise end the person's session.
+ */
+const RENEWAL_GRACE_SECONDS = MINUTE;
+/** Renewals remembered at most, on one running copy of the server. */
+const RENEWALS_KEPT = 1_000;
 
 /** The registration fields worth remembering. They are sealed into the client id itself. */
 type ClientRecord = Pick<
@@ -141,7 +149,7 @@ const asker = (pending: PendingLogin, mayWrite: boolean): LoginAsker => ({
  * Taiga has no OAuth of its own, so the person types their Taiga username and password into
  * this server's sign-in page. The password is passed on to Taiga once and never kept; the
  * Taiga tokens that come back are sealed into the tokens given to the app. Nothing is stored
- * on the server.
+ * on the server, apart from used codes and the last minute's renewals, in memory.
  */
 export class TaigaOAuthProvider implements OAuthServerProvider {
   readonly #sealer: Sealer;
@@ -153,6 +161,11 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
   readonly #showLogin: ProviderOptions['showLogin'];
   /** Codes already traded, until they expire. Kept in memory: a best effort on top of PKCE. */
   readonly #usedCodes = new Map<string, number>();
+  /**
+   * Recent renewals by a hash of the refresh token used, for RENEWAL_GRACE_SECONDS. Kept in
+   * memory, so it only covers a retry that reaches the same running copy of the server.
+   */
+  readonly #renewals = new Map<string, { readonly until: number; readonly tokens: Promise<OAuthTokens> }>();
 
   constructor(options: ProviderOptions) {
     this.#sealer = options.sealer;
@@ -276,11 +289,42 @@ export class TaigaOAuthProvider implements OAuthServerProvider {
   async exchangeRefreshToken(client: OAuthClientInformationFull, refreshToken: string): Promise<OAuthTokens> {
     const refresh = this.#sealer.open<Refresh>('refresh', refreshToken)?.data;
     if (refresh === undefined || refresh.cid !== fingerprint(client.client_id)) {
+      console.error('taiga-mcp: renewal refused: refresh token expired, changed or for another app');
       throw new InvalidGrantError('The refresh token is not valid. Sign in again.');
     }
     if (!this.#serves(refresh.url)) throw new InvalidGrantError('Sign in again.');
-    const tokens = await this.#taigaAt(refresh.url).refresh(refresh.refresh);
-    if (tokens === undefined) throw new InvalidGrantError('Taiga ended the session. Sign in again.');
+
+    const now = this.#now();
+    for (const [key, renewal] of this.#renewals) if (renewal.until <= now) this.#renewals.delete(key);
+    const key = createHash('sha256').update(refreshToken).digest('base64url');
+    const earlier = this.#renewals.get(key);
+    if (earlier !== undefined) return earlier.tokens;
+
+    const tokens = this.#renew(refresh);
+    this.#renewals.set(key, { until: now + RENEWAL_GRACE_SECONDS, tokens });
+    // Maps keep insertion order: the first key is the oldest renewal.
+    if (this.#renewals.size > RENEWALS_KEPT) this.#renewals.delete(this.#renewals.keys().next().value ?? '');
+    try {
+      return await tokens;
+    } catch (error) {
+      this.#renewals.delete(key);
+      throw error;
+    }
+  }
+
+  async #renew(refresh: Refresh): Promise<OAuthTokens> {
+    const host = new URL(refresh.url).host;
+    let tokens: TaigaTokens | undefined;
+    try {
+      tokens = await this.#taigaAt(refresh.url).refresh(refresh.refresh);
+    } catch (error) {
+      console.error(`taiga-mcp: renewal could not be checked at ${host}: ${String(error)}`);
+      throw error;
+    }
+    if (tokens === undefined) {
+      console.error(`taiga-mcp: renewal refused: ${host} no longer accepts the refresh token`);
+      throw new InvalidGrantError('Taiga ended the session. Sign in again.');
+    }
     // What was allowed at sign-in carries over, as long as the server still offers it.
     return this.#issue(refresh.cid, refresh.url, tokens, refresh.write === true && this.#allowWrites);
   }

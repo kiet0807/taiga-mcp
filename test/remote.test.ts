@@ -10,6 +10,7 @@ import { loadRemoteConfig } from '../src/remote/config.js';
 import { guardedFetch, isPublicAddress, taigaAddress } from '../src/remote/guard.js';
 import { TaigaOAuthProvider } from '../src/remote/provider.js';
 import { Sealer } from '../src/remote/seal.js';
+import { TaigaAuth } from '../src/remote/taiga-auth.js';
 import { acme } from './acme.js';
 import { BASE, json, type Call } from './fake-taiga.js';
 
@@ -63,6 +64,8 @@ async function start(
     if (hosts.at(-1) === 'not-taiga.example.org') return new Response('<html>Hello</html>', { status: 404 });
     if (call.path === '/auth') {
       const { username, password } = call.body as { username: string; password: string };
+      // A Taiga that turns this server away, as a firewall would, whoever signs in.
+      if (username === 'turned-away') return new Response('Forbidden', { status: 403 });
       return PASSWORDS[username] === password
         ? json({ id: 7, username, ...signedIn(username) })
         : json({ _error_message: 'No active account found' }, 401);
@@ -532,7 +535,7 @@ describe('the hosted server', () => {
   });
 
   it('renews tokens through Taiga, once per refresh token', async () => {
-    const { base, calls } = await start();
+    const { base, calls, clock } = await start();
     const { clientId, tokens } = await connectAs(base, 'kiet');
     const renew = () =>
       fetch(
@@ -554,10 +557,56 @@ describe('the hosted server', () => {
       ).toString('base64url'),
     );
 
-    // Taiga gives each refresh token one use.
-    const second = await renew();
-    expect(second.status).toBe(400);
-    expect(await second.json()).toMatchObject({ error: 'invalid_grant' });
+    // Taiga gives each refresh token one use. An app that lost the answer and asks again within
+    // a minute gets the same pair, without a second trip to Taiga.
+    clock.now = new Date(clock.now.getTime() + 30_000);
+    const retried = await renew();
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toEqual(renewed);
+    expect(calls.filter((call) => call.path === '/auth/refresh')).toHaveLength(1);
+
+    // After that, the used refresh token is refused.
+    clock.now = new Date(clock.now.getTime() + 31_000);
+    const late = await renew();
+    expect(late.status).toBe(400);
+    expect(await late.json()).toMatchObject({ error: 'invalid_grant' });
+  });
+
+  it('renews once when an app asks twice at the same moment', async () => {
+    const { base, calls } = await start();
+    const { clientId, tokens } = await connectAs(base, 'kiet');
+    const renew = () =>
+      fetch(
+        `${base}/token`,
+        form({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: clientId }),
+      );
+
+    const [first, second] = await Promise.all([renew(), renew()]);
+    expect([first.status, second.status]).toEqual([200, 200]);
+    const [a, b] = (await Promise.all([first.json(), second.json()])) as Tokens[];
+    expect(a).toEqual(b);
+    expect(calls.filter((call) => call.path === '/auth/refresh')).toHaveLength(1);
+
+    // The renewed refresh token works in turn.
+    const next = await fetch(
+      `${base}/token`,
+      form({ grant_type: 'refresh_token', refresh_token: a?.refresh_token ?? '', client_id: clientId }),
+    );
+    expect(next.status).toBe(200);
+  });
+
+  it('does not hand a remembered renewal to another app', async () => {
+    const { base } = await start();
+    const { clientId, tokens } = await connectAs(base, 'kiet');
+    const renew = (client: string) =>
+      fetch(
+        `${base}/token`,
+        form({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token, client_id: client }),
+      );
+    expect((await renew(clientId)).status).toBe(200);
+    const other = await renew(await register(base));
+    expect(other.status).toBe(400);
+    expect(await other.json()).toMatchObject({ error: 'invalid_grant' });
   });
 
   it('slows down someone guessing passwords', async () => {
@@ -739,6 +788,28 @@ describe('a server for any Taiga', () => {
     expect(hosts).toEqual(['api.taiga.io']);
   });
 
+  it('does not blame the address when Taiga cloud turns the server away', async () => {
+    const { base } = await start({ anyTaiga: true });
+    const { request } = await openLogin(base, await register(base));
+    const response = await fetch(
+      `${base}/login`,
+      form({ request, username: 'turned-away', password: 'whatever', address: 'tree.taiga.io' }),
+    );
+    expect(response.status).toBe(502);
+    expect(await response.text()).toContain('Taiga could not be reached just now.');
+  });
+
+  it('reads the same answer at another address as one that is not a Taiga', async () => {
+    const { base } = await start({ anyTaiga: true });
+    const { request } = await openLogin(base, await register(base));
+    const response = await fetch(
+      `${base}/login`,
+      form({ request, username: 'turned-away', password: 'whatever', address: 'taiga.example.com' }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('No Taiga could be reached at that address.');
+  });
+
   it.each([
     'localhost',
     'http://localhost:9000',
@@ -875,6 +946,16 @@ describe('the guard on typed addresses', () => {
       await expect(guardedFetch(`http://${host}:${port}/`), host).rejects.toThrow();
     }
     expect(requests).toBe(0);
+  });
+
+  it('says why a sign-in could not reach Taiga, not just that fetch failed', async () => {
+    const refused = () =>
+      Promise.reject(
+        new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 203.0.113.9:443') }),
+      );
+    await expect(new TaigaAuth('https://taiga.example.com', refused).signIn('kiet', 'pw')).rejects.toThrow(
+      'Could not reach Taiga at https://taiga.example.com (fetch failed: connect ECONNREFUSED 203.0.113.9:443).',
+    );
   });
 });
 

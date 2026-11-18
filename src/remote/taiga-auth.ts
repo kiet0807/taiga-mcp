@@ -49,8 +49,16 @@ export class TaigaAuth {
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      throw new TaigaError(`Could not reach Taiga at ${this.#baseUrl} (${reason}).`);
+      // fetch says only "fetch failed"; what went wrong (refused, timed out, no route) is the cause.
+      const reasons: string[] = [];
+      for (
+        let e: unknown = error;
+        e !== undefined && e !== null && reasons.length < 3;
+        e = (e as { cause?: unknown }).cause
+      ) {
+        reasons.push(e instanceof Error ? e.message : String(e));
+      }
+      throw new TaigaError(`Could not reach Taiga at ${this.#baseUrl} (${reasons.join(': ')}).`);
     }
   }
 }

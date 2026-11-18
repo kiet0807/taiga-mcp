@@ -49,6 +49,7 @@ export function isPublicAddress(address: string): boolean {
 
 /** Taiga cloud is opened at one address and answers its API at another. */
 const TAIGA_CLOUD = new Set(['taiga.io', 'www.taiga.io', 'tree.taiga.io', 'api.taiga.io']);
+export const TAIGA_CLOUD_API = 'https://api.taiga.io';
 
 /**
  * The API host for what a person typed as "the address of my Taiga", or `undefined` when it
@@ -70,7 +71,7 @@ export function taigaAddress(typed: string): string | undefined {
   const host = url.hostname.toLowerCase();
   // Names only: no bare IP addresses, no single-label names such as "localhost".
   if (isIP(host.replace(/^\[|\]$/g, '')) !== 0 || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return undefined;
-  if (TAIGA_CLOUD.has(host)) return 'https://api.taiga.io';
+  if (TAIGA_CLOUD.has(host)) return TAIGA_CLOUD_API;
   return url.origin;
 }
 

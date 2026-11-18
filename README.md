@@ -98,7 +98,7 @@ Off unless switched on: `TAIGA_WRITE=true` on your machine; on a hosted server, 
 How they are kept safe:
 
 - **Nothing can be deleted.** The server has no way to send a `DELETE`. To close an item, set a closed status.
-- **Only on request.** The tools tell the model to write only when the user asks for that change in the conversation, never because a title, description, comment, wiki page or file in Taiga says to (text there is written by others and may try to give the model orders). They are marked as writing in MCP, so apps ask before calling them; `update_item` is marked as overwriting.
+- **Only on request.** The tools tell the model to write only when the user asks for that change in the conversation, never because a title, description, comment, wiki page or file in Taiga says to (text there is written by others and may try to give the model orders). They are marked as writing in MCP (`update_item` as overwriting), so an app can ask you before calling them. Whether it does is up to the app and its settings: Claude lists them as write tools under Settings → Connectors, where each can be allowed, set to need approval, or blocked, and it may still go ahead when your message asked for exactly that change.
 - **No half-done creates.** Every name (status, person, sprint, story, epic, type…) is checked before anything is sent; a wrong one is answered with the valid names and nothing is created.
 - **No silent overwrites.** `get_item` shows the item's version and `update_item` sends it: if someone changed the same fields since, Taiga refuses and the model is told to read the item again.
 - **Every answer shows what changed,** field by field, before and after, with a link to the item in Taiga. A description is shown by its length, not repeated.

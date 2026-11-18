@@ -5,14 +5,40 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Run by hand to ask npm whether it takes this workflow as the package's trusted publisher.
+  # Nothing is published.
+  workflow_dispatch:
 
 permissions:
   contents: write # the GitHub Release
-  id-token: write # npm provenance and signing in to the MCP Registry as this repository
+  id-token: write # npm trusted publishing and provenance; signing in to the MCP Registry
 
 jobs:
+  trusted-publishing:
+    name: npm accepts this workflow (nothing is published)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The same trade npm publish makes: a GitHub identity token for a short-lived npm one,
+      # which is thrown away here. npm's answer says what does not match when it refuses.
+      - name: Trade a GitHub identity token for an npm one
+        run: |
+          id_token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" | jq -r .value)"
+          echo "::add-mask::$id_token"
+          status="$(curl -sS -o answer.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $id_token" \
+            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@kietdev%2ftaiga-mcp")"
+          npm_token="$(jq -r '.token // empty' answer.json 2>/dev/null)"
+          [ -n "$npm_token" ] && echo "::add-mask::$npm_token"
+          echo "npm answered $status: $(jq -c 'del(.token) | if . == {} then "accepted" else . end' answer.json 2>/dev/null || head -c 300 answer.json)"
+          rm -f answer.json
+          [ "$status" -lt 300 ]
+
   publish:
     name: npm and MCP Registry
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

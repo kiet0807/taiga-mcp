@@ -252,6 +252,13 @@ On Vercel no command is needed: the root `app.js` exports the Express app from t
 
 ### How signing in works
 
+What a person sees when an app connects (made-up values):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/sign-in-dark.png">
+  <img src="docs/sign-in-light.png" width="380" alt="The sign-in page. It names the app asking for access (Claude) and the site the person is sent back to (claude.ai), asks for the Taiga address, username and password, and has an unticked box that would also allow changes.">
+</picture>
+
 - **Taiga has no OAuth of its own**, so the server puts a standard OAuth 2.1 sign-in (PKCE, dynamic client registration) in front of Taiga's username and password. People type their Taiga password into this server's page. It is passed to Taiga once, over HTTPS, and is never stored or logged. Run the server only where the people using it would trust it with that.
 - **The sign-in page says where the person will be sent back to.** Any app can register itself under any name, so the name alone proves nothing; the host that receives the result does.
 - **Nothing is stored.** There is no database. The Taiga address and the Taiga tokens a sign-in produces are encrypted (AES-256-GCM, key derived from `MCP_SECRET`) into the tokens the app holds; the server can read them only while answering that app's request.

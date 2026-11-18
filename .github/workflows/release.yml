@@ -80,10 +80,8 @@ jobs:
           else
             npm publish --provenance
           fi
-        env:
-          # npm tries trusted publishing first. The token is only the fallback until a release
-          # shows trusted publishing works; then the NPM_TOKEN secret and this line go.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # No token: npm takes this workflow as the package's trusted publisher (set on npmjs.com:
+        # kiet0807/taiga-mcp, release.yml) and hands it a short-lived one for this run.
 
       # The registry looks the package up on npm, which can take a minute to show a new version.
       - name: Wait until npm serves this version
